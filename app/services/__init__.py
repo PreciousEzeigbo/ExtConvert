@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from backend.app.services.conversion_service import ConversionService
+from app.services.conversion_service import ConversionService
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
