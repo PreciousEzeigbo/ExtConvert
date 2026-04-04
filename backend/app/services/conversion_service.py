@@ -8,8 +8,8 @@ from typing import Any
 
 from fastapi import HTTPException, UploadFile
 
-from app.converters import ConversionManager
-from app.models.models import ConversionJob, ConversionStatus
+from backend.app.converters import ConversionManager
+from backend.app.models.models import ConversionJob, ConversionStatus
 
 
 class ConversionService:
