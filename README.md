@@ -1,3 +1,3 @@
-# Doc Convert
+# Ext Convert
 
-Batch file conversion API built with FastAPI.
+Batch file conversion built with FastAPI and React.
