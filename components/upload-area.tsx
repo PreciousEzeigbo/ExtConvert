@@ -110,7 +110,7 @@ export function UploadArea({ onFilesSelected, acceptedFormats, isLoading = false
                 <button
                   onClick={() => removeFile(index)}
                   disabled={isLoading}
-                  className="ml-2 p-1 hover:bg-destructive/10 rounded transition-colors disabled:opacity-50"
+                  className="ml-2 rounded p-1.5 text-destructive/80 transition-all hover:bg-red-100/85 hover:text-destructive dark:hover:bg-red-900/35 disabled:opacity-50"
                 >
                   <X className="w-4 h-4 text-destructive" />
                 </button>

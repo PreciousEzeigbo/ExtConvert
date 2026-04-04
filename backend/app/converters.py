@@ -7,7 +7,7 @@ Image  → PDF  : PIL → reportlab
 Image  → DOCX : PIL embed into python-docx
 Image  → PNG/JPG/WebP : PIL re-save
 Image  → TXT  : pytesseract OCR
-PDF    → PNG/JPG : pdf2image
+PDF    → PNG/JPG/WebP : pdf2image
 PDF    → TXT  : pypdf text extraction
 PDF    → DOCX : extract text → write docx
 DOCX   → TXT  : python-docx paragraph extraction
@@ -84,7 +84,7 @@ class ConversionManager:
 
         # ── PDF → * ───────────────────────────────────────────────────────────
         elif src_ext == "pdf":
-            if target in {"png", "jpg", "jpeg"}:
+            if target in {"png", "jpg", "jpeg", "webp"}:
                 return self._pdf_to_image(src, out_path, target)
             elif target == "txt":
                 return self._pdf_to_txt(src, out_path)
@@ -167,7 +167,7 @@ class ConversionManager:
 
         if len(pages) == 1:
             img = pages[0]
-            save_fmt = "JPEG" if fmt in {"jpg", "jpeg"} else "PNG"
+            save_fmt = "JPEG" if fmt in {"jpg", "jpeg"} else ("WEBP" if fmt == "webp" else "PNG")
             img.save(out, save_fmt)
         else:
             # Multi-page: stitch vertically
@@ -180,7 +180,7 @@ class ConversionManager:
             for pg in pages:
                 combined.paste(pg, (0, y_off))
                 y_off += pg.height
-            save_fmt = "JPEG" if fmt in {"jpg", "jpeg"} else "PNG"
+            save_fmt = "JPEG" if fmt in {"jpg", "jpeg"} else ("WEBP" if fmt == "webp" else "PNG")
             combined.save(out, save_fmt)
         return out
 

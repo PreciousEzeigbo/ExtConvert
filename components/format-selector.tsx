@@ -8,7 +8,6 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { ArrowRightLeft } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 
 export const CONVERSION_TYPES = [
   { id: 'image-to-pdf', label: 'Image to PDF', from: 'Image', to: 'PDF' },
@@ -19,12 +18,25 @@ export const CONVERSION_TYPES = [
   { id: 'text-to-pdf', label: 'Text to PDF', from: 'Text', to: 'PDF' },
 ];
 
+export const IMAGE_OUTPUT_FORMATS = [
+  { value: 'png', label: 'PNG (.png)' },
+  { value: 'jpg', label: 'JPG (.jpg)' },
+  { value: 'webp', label: 'WEBP (.webp)' },
+];
+
 interface FormatSelectorProps {
   selectedType: string;
   onTypeChange: (type: string) => void;
+  selectedImageFormat: string;
+  onImageFormatChange: (format: string) => void;
 }
 
-export function FormatSelector({ selectedType, onTypeChange }: FormatSelectorProps) {
+export function FormatSelector({
+  selectedType,
+  onTypeChange,
+  selectedImageFormat,
+  onImageFormatChange,
+}: FormatSelectorProps) {
   const currentType = CONVERSION_TYPES.find(t => t.id === selectedType);
 
   const getAcceptedFormats = (type: string): string[] => {
@@ -79,6 +91,26 @@ export function FormatSelector({ selectedType, onTypeChange }: FormatSelectorPro
               <p className="text-sm text-muted-foreground mb-1">To</p>
               <p className="text-lg font-semibold text-foreground">{currentType.to}</p>
             </div>
+          </div>
+        )}
+
+        {currentType?.id === 'pdf-to-image' && (
+          <div>
+            <label className="text-sm font-medium text-foreground mb-2 block">
+              Select Output Image Format
+            </label>
+            <Select value={selectedImageFormat} onValueChange={onImageFormatChange}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Choose output image format" />
+              </SelectTrigger>
+              <SelectContent>
+                {IMAGE_OUTPUT_FORMATS.map(format => (
+                  <SelectItem key={format.value} value={format.value}>
+                    {format.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         )}
 

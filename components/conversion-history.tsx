@@ -82,7 +82,7 @@ export function ConversionHistory({
                     size="sm"
                     variant="outline"
                     onClick={() => onRemoveFromHistory(job.id)}
-                    className="h-8 w-8 p-0"
+                    className="h-8 w-8 p-0 text-destructive border-destructive/40 hover:text-destructive hover:border-destructive/60 hover:bg-red-100/80 dark:hover:bg-red-900/35"
                     title="Remove"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -97,7 +97,7 @@ export function ConversionHistory({
               variant="outline"
               size="sm"
               onClick={onClearHistory}
-              className="w-full text-destructive hover:text-destructive"
+              className="w-full text-destructive border-destructive/40 hover:text-destructive hover:border-destructive/60 hover:bg-red-100/85 dark:hover:bg-red-900/35"
             >
               Clear All History
             </Button>

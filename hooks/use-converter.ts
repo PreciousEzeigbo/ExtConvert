@@ -1,133 +1,156 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { ConversionJob } from '@/components/conversion-queue';
+import { toast } from '@/hooks/use-toast';
+import { clearBackendHistory, startBatchConversion } from '@/lib/conversion-api';
+import { pollJobUntilFinished } from '@/lib/conversion-poller';
+import { useConverterStore } from '@/hooks/use-converter-store';
 
-const STORAGE_KEY = 'converter-history';
-const QUEUE_KEY = 'converter-queue';
+const normalizeFormat = (format: string): string => {
+  const value = format.toLowerCase();
+
+  if (value === 'text') return 'txt';
+  if (value === 'word') return 'docx';
+  if (value === 'image') return 'png';
+
+  return value;
+};
 
 export function useConverter() {
-  const [queue, setQueue] = useState<ConversionJob[]>([]);
-  const [history, setHistory] = useState<ConversionJob[]>([]);
-  const [isConverting, setIsConverting] = useState(false);
-
-  // Load from localStorage on mount
-  useEffect(() => {
-    try {
-      const savedQueue = localStorage.getItem(QUEUE_KEY);
-      const savedHistory = localStorage.getItem(STORAGE_KEY);
-      
-      if (savedQueue) {
-        const parsed = JSON.parse(savedQueue);
-        setQueue(parsed.map((j: any) => ({ ...j, createdAt: new Date(j.createdAt) })));
-      }
-      
-      if (savedHistory) {
-        const parsed = JSON.parse(savedHistory);
-        setHistory(parsed.map((j: any) => ({ ...j, createdAt: new Date(j.createdAt) })));
-      }
-    } catch (error) {
-      console.error('Error loading converter data:', error);
-    }
-  }, []);
-
-  // Save queue to localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
-    } catch (error) {
-      console.error('Error saving queue:', error);
-    }
-  }, [queue]);
-
-  // Save history to localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
-    } catch (error) {
-      console.error('Error saving history:', error);
-    }
-  }, [history]);
+  const activePollController = useRef<AbortController | null>(null);
+  const {
+    queue,
+    history,
+    isConverting,
+    setIsConverting,
+    addToQueue: storeAddToQueue,
+    updateJobStatus,
+    removeFromQueue,
+    addToHistory,
+    removeFromHistory: removeHistoryItem,
+    clearHistory: clearLocalHistory,
+    jobFiles,
+  } = useConverterStore();
 
   const addToQueue = useCallback((files: File[], conversionType: string) => {
-    const newJobs: ConversionJob[] = files.map((file, index) => ({
-      id: `${Date.now()}-${index}`,
-      fileName: file.name,
-      fromFormat: conversionType.split('-')[0],
-      toFormat: conversionType.split('-')[2],
-      status: 'pending',
-      createdAt: new Date(),
-    }));
+    const [fromRaw, , toRaw] = conversionType.split('-');
 
-    setQueue(prev => [...prev, ...newJobs]);
-  }, []);
+    const jobs: ConversionJob[] = files.map(file => {
+      const fileId = crypto.randomUUID();
 
-  const updateJobStatus = useCallback((jobId: string, status: ConversionJob['status'], data?: Partial<ConversionJob>) => {
-    setQueue(prev =>
-      prev.map(job =>
-        job.id === jobId
-          ? { ...job, status, ...data }
-          : job
-      )
-    );
-  }, []);
+      return {
+        id: fileId,
+        fileId,
+        fileName: file.name,
+        fromFormat: normalizeFormat(fromRaw || ''),
+        toFormat: normalizeFormat(toRaw || ''),
+        status: 'pending',
+        createdAt: new Date(),
+      };
+    });
 
-  const removeFromQueue = useCallback((jobId: string) => {
-    setQueue(prev => prev.filter(job => job.id !== jobId));
-  }, []);
+    storeAddToQueue(jobs, files);
+  }, [storeAddToQueue]);
 
   const convertFiles = useCallback(async (jobIds: string[]) => {
+    activePollController.current?.abort();
+    activePollController.current = new AbortController();
+
     setIsConverting(true);
 
-    const jobsToConvert = queue.filter(j => jobIds.includes(j.id));
+    const jobsToConvert = queue.filter(job => jobIds.includes(job.id));
+    const jobsByTarget = jobsToConvert.reduce<Record<string, ConversionJob[]>>((accumulator, job) => {
+      if (!accumulator[job.toFormat]) {
+        accumulator[job.toFormat] = [];
+      }
+
+      accumulator[job.toFormat].push(job);
+      return accumulator;
+    }, {});
 
     try {
-      for (const job of jobsToConvert) {
-        updateJobStatus(job.id, 'processing', { progress: 0 });
+      for (const [targetFormat, jobsInGroup] of Object.entries(jobsByTarget)) {
+        jobsInGroup.forEach(job => updateJobStatus(job.id, 'processing', { progress: 10 }));
 
-        try {
-          // Simulate conversion process with progress updates
-          const progressInterval = setInterval(() => {
-            updateJobStatus(job.id, 'processing', {
-              progress: prev => Math.min((prev || 0) + Math.random() * 30, 90)
+        const fileEntries = jobsInGroup
+          .map(job => ({ job, file: jobFiles[job.id] }))
+          .filter((item): item is { job: ConversionJob; file: File } => Boolean(item.file));
+
+        if (fileEntries.length === 0) {
+          jobsInGroup.forEach(job => {
+            updateJobStatus(job.id, 'failed', {
+              error: 'Missing source file. Re-upload and try again.',
+              progress: 0,
             });
-          }, 500);
-
-          // Simulate API call delay
-          await new Promise(resolve => setTimeout(resolve, 2000));
-
-          clearInterval(progressInterval);
-
-          // Mark as completed
-          const completedJob: ConversionJob = {
-            ...job,
-            status: 'completed',
-            progress: 100,
-            downloadUrl: `/api/download/${job.id}`,
-          };
-
-          updateJobStatus(job.id, 'completed', {
-            progress: 100,
-            downloadUrl: completedJob.downloadUrl,
           });
 
-          // Move to history
-          setHistory(prev => [...prev, completedJob]);
-          removeFromQueue(job.id);
+          continue;
+        }
+
+        try {
+          const { batchId } = await startBatchConversion({
+            files: fileEntries.map(entry => entry.file),
+            fileIds: fileEntries.map(entry => entry.job.fileId),
+            targetFormat,
+          });
+
+          fileEntries.forEach(({ job }) => updateJobStatus(job.id, 'processing', { progress: 50 }));
+
+          const backendJob = await pollJobUntilFinished(batchId, {
+            signal: activePollController.current?.signal,
+          });
+          const resultByFileId = new Map(backendJob.results.map(result => [result.file_id, result]));
+
+          fileEntries.forEach(({ job }) => {
+            const result = resultByFileId.get(job.fileId);
+
+            if (result?.status === 'success') {
+              const completedJob: ConversionJob = {
+                ...job,
+                status: 'completed',
+                progress: 100,
+                downloadUrl: `${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8001'}/api/jobs/${batchId}/download/${job.fileId}`,
+              };
+
+              toast({
+                title: 'Conversion completed',
+                description: `${job.fileName} is ready for download.`,
+                className: 'completion-toast text-foreground',
+              });
+
+              addToHistory(completedJob);
+              removeFromQueue(job.id);
+              return;
+            }
+
+            updateJobStatus(job.id, 'failed', {
+              progress: 100,
+              error: result?.error || 'Conversion failed for this file.',
+            });
+          });
         } catch (error) {
-          updateJobStatus(job.id, 'failed', {
-            error: 'Conversion failed. Please try again.',
+          jobsInGroup.forEach(job => {
+            updateJobStatus(job.id, 'failed', {
+              progress: 100,
+              error: error instanceof Error ? error.message : 'Conversion failed. Please try again.',
+            });
           });
         }
       }
     } finally {
+      activePollController.current?.abort();
+      activePollController.current = null;
       setIsConverting(false);
     }
-  }, [queue, updateJobStatus, removeFromQueue]);
+  }, [addToHistory, jobFiles, queue, removeFromQueue, setIsConverting, updateJobStatus]);
+
+  useEffect(() => () => {
+    activePollController.current?.abort();
+  }, []);
 
   const downloadFile = useCallback((jobId: string) => {
-    const job = history.find(j => j.id === jobId) || queue.find(j => j.id === jobId);
+    const job = history.find(item => item.id === jobId) || queue.find(item => item.id === jobId);
     if (!job || !job.downloadUrl) return;
 
-    // Create a mock download - in production, this would be a real file download
     const link = document.createElement('a');
     link.href = job.downloadUrl;
     link.download = `${job.fileName.split('.')[0]}.${job.toFormat.toLowerCase()}`;
@@ -137,12 +160,16 @@ export function useConverter() {
   }, [history, queue]);
 
   const removeFromHistory = useCallback((jobId: string) => {
-    setHistory(prev => prev.filter(job => job.id !== jobId));
-  }, []);
+    removeHistoryItem(jobId);
+  }, [removeHistoryItem]);
 
   const clearHistory = useCallback(() => {
-    setHistory([]);
-  }, []);
+    clearLocalHistory();
+
+    clearBackendHistory().catch(error => {
+      console.error('Failed to clear backend history:', error);
+    });
+  }, [clearLocalHistory]);
 
   return {
     queue,

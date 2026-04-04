@@ -9,6 +9,8 @@ dependencies = [
     "uvicorn[standard]",
     "python-multipart",
     "aiofiles",
+    "httpx",
+    "supabase",
     "pillow",
     "pypdf",
     "pdf2image",

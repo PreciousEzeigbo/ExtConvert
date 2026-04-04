@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 
 export interface ConversionJob {
   id: string;
+  fileId: string;
   fileName: string;
   fromFormat: string;
   toFormat: string;
@@ -64,7 +65,7 @@ export function ConversionQueue({
       case 'failed':
         return 'bg-red-50 border-red-200 dark:bg-red-950/20 dark:border-red-900';
       case 'processing':
-        return 'bg-blue-50 border-blue-200 dark:bg-blue-950/20 dark:border-blue-900';
+        return 'bg-blue-50/70 border-blue-300 dark:bg-blue-950/25 dark:border-blue-800 shadow-[0_0_0_1px_rgba(59,130,246,0.2)]';
       default:
         return 'bg-muted/30 border-border';
     }
@@ -85,9 +86,9 @@ export function ConversionQueue({
         </div>
         
         {job.status === 'processing' && job.progress !== undefined && (
-          <div className="mt-2 w-full bg-border rounded-full h-1.5 overflow-hidden">
+          <div className="mt-2 w-full bg-border/70 rounded-full h-2 overflow-hidden">
             <div
-              className="h-full bg-primary transition-all duration-300"
+              className="h-full progress-stripes transition-all duration-500"
               style={{ width: `${job.progress}%` }}
             />
           </div>
@@ -116,7 +117,7 @@ export function ConversionQueue({
             size="sm"
             variant="outline"
             onClick={() => onRemove(job.id)}
-            className="h-8 w-8 p-0"
+            className="h-8 w-8 p-0 text-destructive border-destructive/40 hover:text-destructive hover:border-destructive/60 hover:bg-red-100/80 dark:hover:bg-red-900/35"
             title="Remove"
           >
             <Trash2 className="w-4 h-4" />
