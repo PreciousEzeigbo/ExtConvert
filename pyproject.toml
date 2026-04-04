@@ -1,0 +1,25 @@
+[project]
+name = "doc-convert"
+version = "0.1.0"
+description = "Batch file conversion API using FastAPI"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "python-multipart",
+    "aiofiles",
+    "pillow",
+    "pypdf",
+    "pdf2image",
+    "python-docx",
+    "reportlab",
+    "pytesseract",
+]
+
+[build-system]
+requires = ["hatchling>=1.24.2"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
