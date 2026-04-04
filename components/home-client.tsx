@@ -37,6 +37,9 @@ export function HomeClient() {
   };
 
   const acceptedFormats = getAcceptedFormatsForType(selectedType);
+  const failedCount =
+    queue.filter(job => job.status === 'failed').length +
+    history.filter(job => job.status === 'failed').length;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
@@ -190,7 +193,7 @@ export function HomeClient() {
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Failed:</span>
                     <span className="font-semibold text-destructive">
-                      {history.filter(j => j.status === 'failed').length}
+                      {failedCount}
                     </span>
                   </div>
                 </div>

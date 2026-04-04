@@ -31,11 +31,6 @@ export function useConverter() {
     jobFiles,
   } = useConverterStore();
 
-  const moveJobToHistory = useCallback((job: ConversionJob) => {
-    addToHistory(job);
-    removeFromQueue(job.id);
-  }, [addToHistory, removeFromQueue]);
-
   const addToQueue = useCallback((files: File[], conversionType: string) => {
     const [fromRaw, , toRaw] = conversionType.split('-');
 
@@ -105,7 +100,7 @@ export function useConverter() {
           });
           const resultByFileId = new Map(backendJob.results.map(result => [result.file_id, result]));
 
-          fileEntries.forEach(({ job }) => {
+          for (const { job } of fileEntries) {
             const result = resultByFileId.get(job.fileId);
 
             if (result?.status === 'success') {
@@ -122,8 +117,9 @@ export function useConverter() {
                 className: 'completion-toast text-foreground',
               });
 
-              moveJobToHistory(completedJob);
-              return;
+              addToHistory(completedJob);
+              removeFromQueue(job.id);
+              continue;
             }
 
             const failedJob: ConversionJob = {
@@ -137,22 +133,13 @@ export function useConverter() {
               progress: 100,
               error: failedJob.error,
             });
-            moveJobToHistory(failedJob);
-          });
+          }
         } catch (error) {
           jobsInGroup.forEach(job => {
-            const failedJob: ConversionJob = {
-              ...job,
-              status: 'failed',
-              progress: 100,
-              error: error instanceof Error ? error.message : 'Conversion failed. Please try again.',
-            };
-
             updateJobStatus(job.id, 'failed', {
               progress: 100,
-              error: failedJob.error,
+              error: error instanceof Error ? error.message : 'Conversion failed. Please try again.',
             });
-            moveJobToHistory(failedJob);
           });
         }
       }
@@ -161,7 +148,7 @@ export function useConverter() {
       activePollController.current = null;
       setIsConverting(false);
     }
-  }, [jobFiles, moveJobToHistory, queue, setIsConverting, updateJobStatus]);
+  }, [addToHistory, jobFiles, queue, removeFromQueue, setIsConverting, updateJobStatus]);
 
   useEffect(() => () => {
     activePollController.current?.abort();
