@@ -31,6 +31,11 @@ export function useConverter() {
     jobFiles,
   } = useConverterStore();
 
+  const moveJobToHistory = useCallback((job: ConversionJob) => {
+    addToHistory(job);
+    removeFromQueue(job.id);
+  }, [addToHistory, removeFromQueue]);
+
   const addToQueue = useCallback((files: File[], conversionType: string) => {
     const [fromRaw, , toRaw] = conversionType.split('-');
 
@@ -117,22 +122,37 @@ export function useConverter() {
                 className: 'completion-toast text-foreground',
               });
 
-              addToHistory(completedJob);
-              removeFromQueue(job.id);
+              moveJobToHistory(completedJob);
               return;
             }
 
-            updateJobStatus(job.id, 'failed', {
+            const failedJob: ConversionJob = {
+              ...job,
+              status: 'failed',
               progress: 100,
               error: result?.error || 'Conversion failed for this file.',
+            };
+
+            updateJobStatus(job.id, 'failed', {
+              progress: 100,
+              error: failedJob.error,
             });
+            moveJobToHistory(failedJob);
           });
         } catch (error) {
           jobsInGroup.forEach(job => {
-            updateJobStatus(job.id, 'failed', {
+            const failedJob: ConversionJob = {
+              ...job,
+              status: 'failed',
               progress: 100,
               error: error instanceof Error ? error.message : 'Conversion failed. Please try again.',
+            };
+
+            updateJobStatus(job.id, 'failed', {
+              progress: 100,
+              error: failedJob.error,
             });
+            moveJobToHistory(failedJob);
           });
         }
       }
@@ -141,7 +161,7 @@ export function useConverter() {
       activePollController.current = null;
       setIsConverting(false);
     }
-  }, [addToHistory, jobFiles, queue, removeFromQueue, setIsConverting, updateJobStatus]);
+  }, [jobFiles, moveJobToHistory, queue, setIsConverting, updateJobStatus]);
 
   useEffect(() => () => {
     activePollController.current?.abort();
