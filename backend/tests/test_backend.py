@@ -1,3 +1,6 @@
+# pyright: reportUnknownParameterType=false, reportMissingParameterType=false, reportUnknownVariableType=false, reportUnknownMemberType=false
+
+import os
 import tempfile
 import unittest
 from io import BytesIO
@@ -12,6 +15,187 @@ from backend.app import main as main_module
 from backend.app.converters import ConversionManager
 from backend.app.routes import conversion_routes
 from backend.app.services.conversion_service import ConversionService
+
+
+os.environ.setdefault("SUPABASE_URL", "http://localhost:54321")
+os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-key")
+
+
+class _FakeSupabaseResponse:
+    def __init__(self, data=None, count=None):
+        self.data = data
+        self.count = count
+
+
+class _FakeStorageBucket:
+    def __init__(self):
+        self.objects = {}
+
+    def upload(self, path, file, options=None):
+        if hasattr(file, "seek"):
+            file.seek(0)
+        if hasattr(file, "read"):
+            content = file.read()
+        else:
+            content = file
+        if isinstance(content, str):
+            content = content.encode("utf-8")
+        self.objects[path] = bytes(content)
+        return {"path": path}
+
+    def download(self, path):
+        return self.objects[path]
+
+    def create_signed_url(self, path, ttl):
+        return {"signedURL": f"https://example.test/{path}"}
+
+    def remove(self, paths):
+        for path in paths:
+            self.objects.pop(path, None)
+
+
+class _FakeStorage:
+    def __init__(self):
+        self.bucket = _FakeStorageBucket()
+
+    def from_(self, bucket_name):
+        return self.bucket
+
+
+class _FakeTableQuery:
+    def __init__(self, database, table_name):
+        self.database = database
+        self.table_name = table_name
+        self.filters = []
+        self._selected = None
+        self._count = None
+        self._single = False
+        self._order_key = None
+        self._order_desc = False
+        self._limit = None
+        self._insert_rows = None
+        self._update_values = None
+        self._delete = False
+
+    def select(self, columns, count=None):
+        self._selected = columns
+        self._count = count
+        return self
+
+    def insert(self, rows):
+        self._insert_rows = rows if isinstance(rows, list) else [rows]
+        return self
+
+    def update(self, values):
+        self._update_values = values
+        return self
+
+    def delete(self):
+        self._delete = True
+        return self
+
+    def eq(self, column, value):
+        self.filters.append((column, "eq", value))
+        return self
+
+    def neq(self, column, value):
+        self.filters.append((column, "neq", value))
+        return self
+
+    def lt(self, column, value):
+        self.filters.append((column, "lt", value))
+        return self
+
+    def gte(self, column, value):
+        self.filters.append((column, "gte", value))
+        return self
+
+    def in_(self, column, values):
+        self.filters.append((column, "in", list(values)))
+        return self
+
+    def order(self, column, desc=False):
+        self._order_key = column
+        self._order_desc = desc
+        return self
+
+    def limit(self, value):
+        self._limit = value
+        return self
+
+    def single(self):
+        self._single = True
+        return self
+
+    def execute(self):
+        rows = self.database.tables.setdefault(self.table_name, [])
+
+        def matches(row):
+            for column, op, value in self.filters:
+                current = row.get(column)
+                if op == "eq" and current != value:
+                    return False
+                if op == "neq" and current == value:
+                    return False
+                if op == "lt" and not (current < value):
+                    return False
+                if op == "gte" and not (current >= value):
+                    return False
+                if op == "in" and current not in value:
+                    return False
+            return True
+
+        filtered = [row for row in rows if matches(row)]
+
+        if self._delete:
+            self.database.tables[self.table_name] = [row for row in rows if not matches(row)]
+            return _FakeSupabaseResponse([])
+
+        if self._update_values is not None:
+            for row in rows:
+                if matches(row):
+                    row.update(self._update_values)
+            return _FakeSupabaseResponse([])
+
+        if self._insert_rows is not None:
+            inserted_rows = []
+            for row in self._insert_rows:
+                row_copy = dict(row)
+                if self.table_name == "conversion_job_files" and "id" not in row_copy:
+                    row_copy["id"] = len(self.database.tables[self.table_name]) + 1
+                inserted_rows.append(row_copy)
+
+            self.database.tables[self.table_name].extend(inserted_rows)
+            return _FakeSupabaseResponse(inserted_rows)
+
+        if self._order_key is not None:
+            filtered = sorted(filtered, key=lambda row: row.get(self._order_key), reverse=self._order_desc)
+
+        if self._limit is not None:
+            filtered = filtered[: self._limit]
+
+        data = filtered[0] if self._single else filtered
+        count = len(filtered) if self._count is not None else None
+        return _FakeSupabaseResponse(data, count=count)
+
+
+class _FakeSupabaseClient:
+    def __init__(self):
+        self.tables = {
+            "conversion_jobs": [],
+            "conversion_job_files": [],
+        }
+        self.storage = _FakeStorage()
+
+    def table(self, name):
+        return _FakeTableQuery(self, name)
+
+
+def _build_test_service(base_dir: Path) -> ConversionService:
+    with patch.object(ConversionService, "cleanup_artifacts", lambda self: None):
+        service = ConversionService(base_dir)
+    service.supabase = _FakeSupabaseClient()
+    return service
 
 
 def make_text_file(directory: Path, name: str, content: str) -> Path:
@@ -39,7 +223,7 @@ class BackendServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tempdir = tempfile.TemporaryDirectory()
         self.base_dir = Path(self.tempdir.name)
-        self.service = ConversionService(self.base_dir)
+        self.service = _build_test_service(self.base_dir)
 
     def tearDown(self) -> None:
         self.tempdir.cleanup()
@@ -67,14 +251,10 @@ class BackendServiceTests(unittest.TestCase):
             self._run_async(self.service.create_batch_job([upload], "pdf", file_ids=["../bad"]))
 
     def test_unique_output_paths_preserve_readable_stem(self) -> None:
-        first = self.service._build_unique_output_path("Quarterly report.txt", "pdf")
-        first.write_text("one", encoding="utf-8")
-        second = self.service._build_unique_output_path("Quarterly report.txt", "pdf")
+        filename = self.service._build_output_filename("Quarterly report.txt", "pdf")
 
-        self.assertTrue(first.name.startswith("Quarterly report"))
-        self.assertTrue(first.name.endswith(".pdf"))
-        self.assertTrue(second.name.startswith("Quarterly report"))
-        self.assertNotEqual(first.name, second.name)
+        self.assertTrue(filename.startswith("Quarterly report"))
+        self.assertTrue(filename.endswith(".pdf"))
 
     def test_resolve_output_by_filename_blocks_traversal(self) -> None:
         with self.assertRaisesRegex(Exception, "Invalid filename"):
@@ -88,9 +268,8 @@ class BackendServiceTests(unittest.TestCase):
         self._run_async(self.service.run_batch(batch["batch_id"]))
 
         job = self.service.get_job(batch["batch_id"])
-        self.assertEqual(job.status.value, "done")
-        self.assertEqual(job.results[0]["file_id"], "file_001")
-        self.assertTrue((self.base_dir / "history" / "log.json").exists())
+        self.assertEqual(job["status"], "done")
+        self.assertEqual(job["results"][0]["file_id"], "file_001")
         self.assertGreaterEqual(len(self.service.load_history()), 1)
 
     def _run_async(self, value):
@@ -146,7 +325,7 @@ class ApiRouteTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tempdir = tempfile.TemporaryDirectory()
         self.base_dir = Path(self.tempdir.name)
-        self.service = ConversionService(self.base_dir)
+        self.service = _build_test_service(self.base_dir)
         self.patch = patch.object(conversion_routes, "conversion_service", self.service)
         self.patch.start()
         self.client = TestClient(main_module.app)
@@ -161,7 +340,7 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["status"], "healthy")
-        self.assertEqual(payload["storage_backend"], "local")
+        self.assertEqual(payload["storage_backend"], "supabase")
 
     def test_formats_endpoint_exposes_supported_pairs(self) -> None:
         response = self.client.get("/api/formats")
@@ -171,17 +350,29 @@ class ApiRouteTests(unittest.TestCase):
         self.assertIn({"from": "pdf", "to": "webp", "label": "PDF -> WebP", "group": "doc_to_image"}, payload["conversions"])
 
     def test_history_clear_endpoint_empties_history(self) -> None:
-        self.service.save_history({
-            "batch_id": "batch-1",
-            "target_format": "pdf",
-            "total": 1,
-            "completed": 1,
-            "failed": 0,
-            "created_at": "2026-04-04T00:00:00Z",
-            "finished_at": "2026-04-04T00:01:00Z",
+        self.service.supabase.tables["conversion_jobs"].append({
+            "id": "batch-1",
             "status": "done",
-            "files": [],
+            "created_at": "2026-04-04T00:00:00Z",
+            "updated_at": "2026-04-04T00:01:00Z",
         })
+        self.service.supabase.tables["conversion_job_files"].append({
+            "id": "file-1",
+            "batch_id": "batch-1",
+            "file_id": "file-1",
+            "original_name": "input.txt",
+            "source_ext": ".txt",
+            "source_path": "uploads/file-1/input.txt",
+            "target_format": "pdf",
+            "status": "success",
+            "output_path": "outputs/file-1/input.pdf",
+            "output_filename": "input.pdf",
+            "error": None,
+            "created_at": "2026-04-04T00:00:00Z",
+            "updated_at": "2026-04-04T00:01:00Z",
+        })
+        self.service.supabase.storage.bucket.objects["uploads/file-1/input.txt"] = b"input"
+        self.service.supabase.storage.bucket.objects["outputs/file-1/input.pdf"] = b"output"
 
         clear_response = self.client.delete("/api/history")
         self.assertEqual(clear_response.status_code, 200)
@@ -208,9 +399,9 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(status_payload["status"], "done")
         self.assertEqual(status_payload["results"][0]["file_id"], "route_file_001")
 
-        download_response = self.client.get(f"/api/jobs/{batch_id}/download/route_file_001")
-        self.assertEqual(download_response.status_code, 200)
-        self.assertGreater(len(download_response.content), 0)
+        download_response = self.client.get(f"/api/jobs/{batch_id}/download/route_file_001", follow_redirects=False)
+        self.assertEqual(download_response.status_code, 307)
+        self.assertIn("https://example.test/", download_response.headers["location"])
 
     def _wait_for_job(self, batch_id: str) -> dict:
         for _ in range(30):
@@ -230,7 +421,9 @@ def _upload_file(path: Path):
 class _SimpleUploadFile:
     def __init__(self, filename: str, content: bytes):
         self.filename = filename
+        self.content_type = "text/plain"
         self._content = BytesIO(content)
+        self.file = BytesIO(content)
 
     async def read(self) -> bytes:
         return self._content.getvalue()

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 
 export interface ConversionJob {
   id: string;
+  batchId?: string;
   fileId: string;
   fileName: string;
   fromFormat: string;
@@ -13,6 +14,9 @@ export interface ConversionJob {
   progress?: number;
   error?: string;
   downloadUrl?: string;
+  outputFilename?: string;
+  outputSize?: number;
+  downloaded?: boolean;
   createdAt: Date;
 }
 
@@ -33,8 +37,6 @@ export function ConversionQueue({
 }: ConversionQueueProps) {
   const pendingJobs = jobs.filter(j => j.status === 'pending');
   const processingJobs = jobs.filter(j => j.status === 'processing');
-  const completedJobs = jobs.filter(j => j.status === 'completed');
-  const failedJobs = jobs.filter(j => j.status === 'failed');
 
   if (jobs.length === 0) {
     return (
@@ -168,27 +170,6 @@ export function ConversionQueue({
         </div>
       )}
 
-      {completedJobs.length > 0 && (
-        <div className="space-y-3">
-          <h3 className="text-sm font-semibold text-foreground">Completed ({completedJobs.length})</h3>
-          <div className="space-y-2">
-            {completedJobs.map(job => (
-              <JobItem key={job.id} job={job} />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {failedJobs.length > 0 && (
-        <div className="space-y-3">
-          <h3 className="text-sm font-semibold text-foreground">Failed ({failedJobs.length})</h3>
-          <div className="space-y-2">
-            {failedJobs.map(job => (
-              <JobItem key={job.id} job={job} />
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

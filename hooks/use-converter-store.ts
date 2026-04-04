@@ -82,6 +82,16 @@ export function useConverterStore() {
     setHistory(prev => [...prev, job]);
   }, []);
 
+  const updateHistoryJob = useCallback((jobId: string, data: Partial<ConversionJob>) => {
+    setHistory(prev =>
+      prev.map(job =>
+        job.id === jobId
+          ? { ...job, ...data }
+          : job
+      )
+    );
+  }, []);
+
   const removeFromHistory = useCallback((jobId: string) => {
     setHistory(prev => prev.filter(job => job.id !== jobId));
   }, []);
@@ -99,6 +109,7 @@ export function useConverterStore() {
     updateJobStatus,
     removeFromQueue,
     addToHistory,
+    updateHistoryJob,
     removeFromHistory,
     clearHistory,
     jobFiles,

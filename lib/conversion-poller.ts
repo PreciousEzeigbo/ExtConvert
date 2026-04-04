@@ -1,5 +1,10 @@
 import { fetchConversionJob, type BackendJob } from '@/lib/conversion-api';
 
+const TERMINAL_STATUSES = new Set<BackendJob['status']>(['done', 'partial', 'failed']);
+const FAST_POLL_MS = 500;
+const SLOW_POLL_MS = 3000;
+const SLOW_POLL_AFTER_MS = 10000;
+
 const sleep = (ms: number, signal?: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
     const timeoutId = setTimeout(() => {
@@ -28,15 +33,15 @@ export async function pollJobUntilFinished(
     maxAttempts?: number;
     startingDelayMs?: number;
     maxDelayMs?: number;
-    backoffMultiplier?: number;
   }
 ): Promise<BackendJob> {
   const maxAttempts = options?.maxAttempts ?? 60;
-  const startingDelayMs = options?.startingDelayMs ?? 1000;
-  const maxDelayMs = options?.maxDelayMs ?? 10000;
-  const backoffMultiplier = options?.backoffMultiplier ?? 1.5;
+  const startingDelayMs = options?.startingDelayMs ?? FAST_POLL_MS;
+  const maxDelayMs = options?.maxDelayMs ?? SLOW_POLL_MS;
 
   let delayMs = startingDelayMs;
+  let lastStatus: BackendJob['status'] | null = null;
+  let lastStatusChangeAt = performance.now();
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     if (options?.signal?.aborted) {
@@ -44,13 +49,26 @@ export async function pollJobUntilFinished(
     }
 
     const job = await fetchConversionJob(batchId, options?.signal);
-    if (job.status === 'done' || job.status === 'partial' || job.status === 'failed') {
+    if (TERMINAL_STATUSES.has(job.status)) {
       return job;
+    }
+
+    const now = performance.now();
+    if (job.status !== lastStatus) {
+      lastStatus = job.status;
+      lastStatusChangeAt = now;
+      delayMs = startingDelayMs;
+    } else if (job.status === 'processing' && now - lastStatusChangeAt > SLOW_POLL_AFTER_MS) {
+      delayMs = SLOW_POLL_MS;
+    } else {
+      delayMs = startingDelayMs;
     }
 
     if (attempt < maxAttempts) {
       await sleep(delayMs, options?.signal);
-      delayMs = Math.min(Math.ceil(delayMs * backoffMultiplier), maxDelayMs);
+      if (job.status === 'processing' && now - lastStatusChangeAt > SLOW_POLL_AFTER_MS) {
+        delayMs = maxDelayMs;
+      }
     }
   }
 

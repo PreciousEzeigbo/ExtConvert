@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { ConversionJob } from '@/components/conversion-queue';
 import { toast } from '@/hooks/use-toast';
-import { clearBackendHistory, startBatchConversion } from '@/lib/conversion-api';
+import { API_BASE_URL, clearBackendHistory, startBatchConversion } from '@/lib/conversion-api';
 import { pollJobUntilFinished } from '@/lib/conversion-poller';
 import { useConverterStore } from '@/hooks/use-converter-store';
+import JSZip from 'jszip';
 
 const normalizeFormat = (format: string): string => {
   const value = format.toLowerCase();
@@ -13,6 +14,37 @@ const normalizeFormat = (format: string): string => {
   if (value === 'image') return 'png';
 
   return value;
+};
+
+type ResultJob = ConversionJob & { batchId: string };
+type CompletedResultJob = ConversionJob & {
+  batchId: string;
+  status: 'completed';
+  downloadUrl: string;
+  outputFilename: string;
+  downloaded: false;
+};
+type FailedResultJob = ConversionJob & {
+  batchId: string;
+  status: 'failed';
+  error: string;
+  downloaded: false;
+};
+
+const toUserFacingError = (error: unknown): string => {
+  if (error instanceof DOMException && error.name === 'AbortError') {
+    return 'Conversion was interrupted. Please try again.';
+  }
+
+  if (error instanceof TypeError) {
+    return `Cannot reach conversion API at ${API_BASE_URL}. Start the backend or set NEXT_PUBLIC_API_BASE_URL.`;
+  }
+
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+
+  return 'Conversion failed. Please try again.';
 };
 
 export function useConverter() {
@@ -26,10 +58,52 @@ export function useConverter() {
     updateJobStatus,
     removeFromQueue,
     addToHistory,
+    updateHistoryJob,
     removeFromHistory: removeHistoryItem,
     clearHistory: clearLocalHistory,
     jobFiles,
   } = useConverterStore();
+
+  const formatDownloadFilename = useCallback((job: ConversionJob) => {
+    if (job.outputFilename) return job.outputFilename;
+    const baseName = job.fileName.includes('.') ? job.fileName.replace(/\.[^/.]+$/, '') : job.fileName;
+    return `${baseName}.${job.toFormat.toLowerCase()}`;
+  }, []);
+
+  const fetchRemoteFileSize = useCallback(async (url: string) => {
+    try {
+      const headResponse = await fetch(url, { method: 'HEAD' });
+      if (headResponse.ok) {
+        const headerSize = headResponse.headers.get('content-length');
+        if (headerSize) {
+          const parsed = Number(headerSize);
+          if (Number.isFinite(parsed) && parsed >= 0) {
+            return parsed;
+          }
+        }
+      }
+    } catch {
+      // Fallback below.
+    }
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) return undefined;
+      const blob = await response.blob();
+      return blob.size;
+    } catch {
+      return undefined;
+    }
+  }, []);
+
+  const triggerDownload = useCallback((downloadUrl: string, filename: string) => {
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }, []);
 
   const addToQueue = useCallback((files: File[], conversionType: string) => {
     const [fromRaw, , toRaw] = conversionType.split('-');
@@ -70,6 +144,7 @@ export function useConverter() {
     try {
       for (const [targetFormat, jobsInGroup] of Object.entries(jobsByTarget)) {
         jobsInGroup.forEach(job => updateJobStatus(job.id, 'processing', { progress: 10 }));
+        let batchId = '';
 
         const fileEntries = jobsInGroup
           .map(job => ({ job, file: jobFiles[job.id] }))
@@ -87,58 +162,94 @@ export function useConverter() {
         }
 
         try {
-          const { batchId } = await startBatchConversion({
+          ({ batchId } = await startBatchConversion({
             files: fileEntries.map(entry => entry.file),
             fileIds: fileEntries.map(entry => entry.job.fileId),
             targetFormat,
-          });
+          }));
 
-          fileEntries.forEach(({ job }) => updateJobStatus(job.id, 'processing', { progress: 50 }));
+          fileEntries.forEach(({ job }) => updateJobStatus(job.id, 'processing', { progress: 50, batchId }));
 
           const backendJob = await pollJobUntilFinished(batchId, {
             signal: activePollController.current?.signal,
           });
           const resultByFileId = new Map(backendJob.results.map(result => [result.file_id, result]));
 
-          for (const { job } of fileEntries) {
-            const result = resultByFileId.get(job.fileId);
+          const completedEntries = (await Promise.all(
+            fileEntries.map(async ({ job }) => {
+              const result = resultByFileId.get(job.fileId);
+              if (result?.status !== 'success') {
+                return null;
+              }
 
-            if (result?.status === 'success') {
-              const completedJob: ConversionJob = {
+              const downloadUrl = `${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8001'}/api/jobs/${batchId}/download/${job.fileId}`;
+              const outputFilename = result.filename || formatDownloadFilename(job);
+              const outputSize = await fetchRemoteFileSize(downloadUrl);
+
+              return {
                 ...job,
-                status: 'completed',
+                batchId,
+                status: 'completed' as const,
                 progress: 100,
-                downloadUrl: `${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8001'}/api/jobs/${batchId}/download/${job.fileId}`,
-              };
+                downloadUrl,
+                outputFilename,
+                outputSize,
+                downloaded: false,
+              } satisfies CompletedResultJob;
+            })
+          )).filter(Boolean) as CompletedResultJob[];
 
-              toast({
-                title: 'Conversion completed',
-                description: `${job.fileName} is ready for download.`,
-                className: 'completion-toast text-foreground',
-              });
+          const failedEntries = fileEntries
+            .map(({ job }) => {
+              const result = resultByFileId.get(job.fileId);
+              if (result?.status === 'success') {
+                return null;
+              }
 
-              addToHistory(completedJob);
-              removeFromQueue(job.id);
-              continue;
-            }
+              return {
+                ...job,
+                batchId,
+                status: 'failed' as const,
+                progress: 100,
+                error: result?.error || 'Conversion failed for this file.',
+                downloaded: false,
+              } satisfies FailedResultJob;
+            })
+            .filter(Boolean) as FailedResultJob[];
 
-            const failedJob: ConversionJob = {
-              ...job,
-              status: 'failed',
-              progress: 100,
-              error: result?.error || 'Conversion failed for this file.',
-            };
+          completedEntries.forEach(job => {
+            toast({
+              title: 'Conversion completed',
+              description: `${job.fileName} is ready for download.`,
+              className: 'completion-toast text-foreground',
+            });
 
+            addToHistory(job);
+            removeFromQueue(job.id);
+          });
+
+          failedEntries.forEach(job => {
             updateJobStatus(job.id, 'failed', {
               progress: 100,
-              error: failedJob.error,
+              error: job.error,
             });
-          }
+            addToHistory(job);
+          });
         } catch (error) {
+          const errorMessage = toUserFacingError(error);
           jobsInGroup.forEach(job => {
             updateJobStatus(job.id, 'failed', {
               progress: 100,
-              error: error instanceof Error ? error.message : 'Conversion failed. Please try again.',
+              error: errorMessage,
+              batchId,
+            });
+            addToHistory({
+              ...job,
+              batchId,
+              status: 'failed',
+              progress: 100,
+              error: errorMessage,
+              downloaded: false,
             });
           });
         }
@@ -148,7 +259,7 @@ export function useConverter() {
       activePollController.current = null;
       setIsConverting(false);
     }
-  }, [addToHistory, jobFiles, queue, removeFromQueue, setIsConverting, updateJobStatus]);
+  }, [addToHistory, fetchRemoteFileSize, formatDownloadFilename, jobFiles, queue, removeFromQueue, setIsConverting, updateJobStatus]);
 
   useEffect(() => () => {
     activePollController.current?.abort();
@@ -158,13 +269,38 @@ export function useConverter() {
     const job = history.find(item => item.id === jobId) || queue.find(item => item.id === jobId);
     if (!job || !job.downloadUrl) return;
 
-    const link = document.createElement('a');
-    link.href = job.downloadUrl;
-    link.download = `${job.fileName.split('.')[0]}.${job.toFormat.toLowerCase()}`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  }, [history, queue]);
+    triggerDownload(job.downloadUrl, formatDownloadFilename(job));
+    updateHistoryJob(job.id, { downloaded: true });
+  }, [formatDownloadFilename, history, queue, triggerDownload, updateHistoryJob]);
+
+  const downloadAll = useCallback(async (batchId: string) => {
+    const completedJobs = history.filter(job => job.batchId === batchId && job.status === 'completed' && job.downloadUrl);
+    if (completedJobs.length === 0) return;
+
+    const zip = new JSZip();
+
+    await Promise.all(completedJobs.map(async job => {
+      const response = await fetch(job.downloadUrl as string);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch ${job.fileName}`);
+      }
+
+      const blob = await response.blob();
+      zip.file(formatDownloadFilename(job), blob);
+    }));
+
+    const zipBlob = await zip.generateAsync({ type: 'blob' });
+    const zipUrl = URL.createObjectURL(zipBlob);
+    triggerDownload(zipUrl, `extconvert-${batchId}.zip`);
+    URL.revokeObjectURL(zipUrl);
+
+    completedJobs.forEach(job => updateHistoryJob(job.id, { downloaded: true }));
+  }, [formatDownloadFilename, history, triggerDownload, updateHistoryJob]);
+
+  const retryHistoryJob = useCallback((jobId: string) => {
+    removeHistoryItem(jobId);
+    convertFiles([jobId]);
+  }, [convertFiles, removeHistoryItem]);
 
   const removeFromHistory = useCallback((jobId: string) => {
     removeHistoryItem(jobId);
@@ -187,7 +323,9 @@ export function useConverter() {
     removeFromQueue,
     convertFiles,
     downloadFile,
+    downloadAll,
     removeFromHistory,
+    retryHistoryJob,
     clearHistory,
   };
 }

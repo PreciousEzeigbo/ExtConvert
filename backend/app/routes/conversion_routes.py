@@ -41,8 +41,20 @@ async def download_file(batch_id: str, file_id: str):
     return RedirectResponse(url=download["url"], status_code=307)
 
 
+@router.head("/api/jobs/{batch_id}/download/{file_id}")
+async def download_file_head(batch_id: str, file_id: str):
+    download = conversion_service.resolve_output_file(batch_id, file_id)
+    return RedirectResponse(url=download["url"], status_code=307)
+
+
 @router.get("/api/download/{filename}")
 async def download_by_name(filename: str):
+    download = conversion_service.resolve_output_by_filename(filename)
+    return RedirectResponse(url=download["url"], status_code=307)
+
+
+@router.head("/api/download/{filename}")
+async def download_by_name_head(filename: str):
     download = conversion_service.resolve_output_by_filename(filename)
     return RedirectResponse(url=download["url"], status_code=307)
 

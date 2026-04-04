@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { FileText, Zap } from 'lucide-react';
 import { UploadArea } from '@/components/upload-area';
 import { FormatSelector, getAcceptedFormatsForType } from '@/components/format-selector';
-import { ConversionQueue } from '@/components/conversion-queue';
 import { ConversionHistory } from '@/components/conversion-history';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { useConverter } from '@/hooks/use-converter';
@@ -21,7 +20,8 @@ export function HomeClient() {
     removeFromQueue,
     convertFiles,
     downloadFile,
-    removeFromHistory,
+    downloadAll,
+    retryHistoryJob,
     clearHistory,
   } = useConverter();
 
@@ -37,9 +37,10 @@ export function HomeClient() {
   };
 
   const acceptedFormats = getAcceptedFormatsForType(selectedType);
-  const failedCount =
-    queue.filter(job => job.status === 'failed').length +
-    history.filter(job => job.status === 'failed').length;
+  const failedIds = new Set<string>();
+  queue.filter(job => job.status === 'failed').forEach(job => failedIds.add(job.id));
+  history.filter(job => job.status === 'failed').forEach(job => failedIds.add(job.id));
+  const failedCount = failedIds.size;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
@@ -91,34 +92,17 @@ export function HomeClient() {
               />
             </section>
 
-            {queue.length > 0 && (
-              <section className="bg-card border border-border rounded-lg p-6 shadow-sm" aria-labelledby="queue-heading">
-                <h3 id="queue-heading" className="text-lg font-semibold text-foreground mb-4">
-                  Conversion Queue
-                </h3>
-                <ConversionQueue
-                  jobs={queue}
-                  onConvert={handleConvert}
-                  onDownload={downloadFile}
-                  onRemove={removeFromQueue}
-                  isConverting={isConverting}
-                />
-              </section>
-            )}
-
-            {history.length > 0 && (
-              <section className="bg-card border border-border rounded-lg p-6 shadow-sm" aria-labelledby="history-heading">
-                <h3 id="history-heading" className="sr-only">
-                  Conversion History
-                </h3>
-                <ConversionHistory
-                  history={history}
-                  onDownload={downloadFile}
-                  onRemoveFromHistory={removeFromHistory}
-                  onClearHistory={clearHistory}
-                />
-              </section>
-            )}
+            <ConversionHistory
+              queue={queue}
+              history={history}
+              onConvert={handleConvert}
+              onDownload={downloadFile}
+              onDownloadAll={downloadAll}
+              onRetry={retryHistoryJob}
+              onRemoveFromQueue={removeFromQueue}
+              onClearHistory={clearHistory}
+              isConverting={isConverting}
+            />
           </section>
 
           <aside className="space-y-6" aria-label="Converter information">

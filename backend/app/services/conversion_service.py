@@ -5,7 +5,8 @@ import tempfile
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from time import monotonic
+from typing import Any, cast
 
 from fastapi import HTTPException, UploadFile
 from supabase import Client, create_client
@@ -24,6 +25,9 @@ class ConversionService:
         self.output_dir = Path("supabase://conversions/outputs")
         self.storage_backend = "supabase"
 
+        self._job_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._cleanup_task: asyncio.Task[None] | None = None
+
         self.upload_ttl_hours = self._int_env("DOC_CONVERT_UPLOAD_TTL_HOURS", 1)
         self.output_ttl_hours = self._int_env("DOC_CONVERT_OUTPUT_TTL_HOURS", 72)
         self.history_retention_days = self._int_env("DOC_CONVERT_HISTORY_RETENTION_DAYS", 30)
@@ -38,7 +42,7 @@ class ConversionService:
         self.supabase: Client = create_client(supabase_url, supabase_key)
         self.bucket = "conversions"
 
-        self.cleanup_artifacts()
+        self._schedule_cleanup_artifacts()
 
     @staticmethod
     def _int_env(key: str, default: int) -> int:
@@ -75,6 +79,102 @@ class ConversionService:
     def _table(self, name: str):
         return self.supabase.table(name)
 
+    def _invalidate_job_cache(self, batch_id: str) -> None:
+        self._job_cache.pop(batch_id, None)
+
+    def _set_job_cache(self, batch_id: str, payload: dict[str, Any]) -> None:
+        self._job_cache[batch_id] = (monotonic(), payload)
+
+    def _get_job_cache(self, batch_id: str) -> dict[str, Any] | None:
+        cached = self._job_cache.get(batch_id)
+        if not cached:
+            return None
+
+        cached_at, payload = cached
+        if monotonic() - cached_at > 0.5:
+            self._job_cache.pop(batch_id, None)
+            return None
+        return payload
+
+    def _schedule_cleanup_artifacts(self) -> None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+
+        if self._cleanup_task is not None and not self._cleanup_task.done():
+            return
+
+        task = loop.create_task(self._cleanup_artifacts_task())
+        self._cleanup_task = task
+        task.add_done_callback(self._clear_cleanup_task)
+
+    def _clear_cleanup_task(self, task: asyncio.Task[None]) -> None:
+        if self._cleanup_task is task:
+            self._cleanup_task = None
+
+    def _upload_bytes(self, source_path: str, payload: bytes, content_type: str) -> None:
+        self.supabase.storage.from_(self.bucket).upload(
+            source_path,
+            payload,
+            {
+                "content-type": content_type,
+                "upsert": "true",
+            },
+        )
+
+    def _download_bytes(self, source_path: str) -> bytes:
+        source_bytes = self.supabase.storage.from_(self.bucket).download(source_path)
+        if isinstance(source_bytes, str):
+            source_bytes = source_bytes.encode("utf-8")
+        return bytes(source_bytes)
+
+    def _update_file_row(self, batch_id: str, filters: dict[str, Any], values: dict[str, Any]) -> None:
+        payload: dict[str, Any] = {**values, "updated_at": self._now_iso()}
+        query = self._table("conversion_job_files").update(payload)
+        for column, value in filters.items():
+            query = query.eq(column, value)
+        query.execute()
+        self._invalidate_job_cache(batch_id)
+
+    def _cleanup_batch(self, batch_id: str) -> None:
+        files = self._fetch_job_files(batch_id)
+        paths_to_remove = [
+            *(f.get("source_path") for f in files),
+            *(f.get("output_path") for f in files),
+        ]
+        self._remove_storage_paths([p for p in paths_to_remove if p])
+        self._table("conversion_job_files").delete().eq("batch_id", batch_id).execute()
+        self._table("conversion_jobs").delete().eq("id", batch_id).execute()
+        self._invalidate_job_cache(batch_id)
+
+    async def _cleanup_artifacts_task(self) -> None:
+        try:
+            old_jobs_resp = await asyncio.to_thread(
+                lambda: self._table("conversion_jobs")
+                .select("id,created_at")
+                .lt("created_at", (datetime.now(timezone.utc) - timedelta(days=self.history_retention_days)).isoformat())
+                .execute()
+            )
+
+            old_jobs: list[dict[str, Any]] = []
+            for item in cast(list[Any], old_jobs_resp.data or []):
+                if isinstance(item, dict):
+                    job_item = cast(dict[str, Any], item)
+                    if job_item.get("id"):
+                        old_jobs.append(job_item)
+
+            if not old_jobs:
+                return
+
+            batch_ids = [str(job["id"]) for job in old_jobs]
+            await asyncio.gather(
+                *(asyncio.to_thread(self._cleanup_batch, batch_id) for batch_id in batch_ids),
+                return_exceptions=True,
+            )
+        except Exception:
+            return
+
     def _fetch_job_row(self, batch_id: str) -> dict[str, Any]:
         result = (
             self._table("conversion_jobs")
@@ -83,7 +183,7 @@ class ConversionService:
             .single()
             .execute()
         )
-        row = result.data
+        row = cast(dict[str, Any] | None, result.data)
         if not row:
             raise HTTPException(status_code=404, detail="Batch not found.")
         return row
@@ -96,24 +196,28 @@ class ConversionService:
             .order("created_at")
             .execute()
         )
-        return list(result.data or [])
+        files: list[dict[str, Any]] = []
+        for item in cast(list[Any], result.data or []):
+            if isinstance(item, dict):
+                files.append(cast(dict[str, Any], item))
+        return files
 
     def _update_job(self, batch_id: str, values: dict[str, Any]) -> None:
-        payload = {**values, "updated_at": self._now_iso()}
+        payload: dict[str, Any] = {**values, "updated_at": self._now_iso()}
         self._table("conversion_jobs").update(payload).eq("id", batch_id).execute()
+        self._invalidate_job_cache(batch_id)
 
     def _create_signed_url(self, path: str) -> str:
-        signed = self.supabase.storage.from_(self.bucket).create_signed_url(
-            path,
-            self.download_url_ttl_seconds,
+        signed = cast(
+            dict[str, Any],
+            self.supabase.storage.from_(self.bucket).create_signed_url(
+                path,
+                self.download_url_ttl_seconds,
+            ),
         )
-        if isinstance(signed, dict):
-            signed_url = signed.get("signedURL") or signed.get("signedUrl")
-            if signed_url:
-                return signed_url
-        signed_url = getattr(signed, "signedURL", None) or getattr(signed, "signedUrl", None)
+        signed_url = signed.get("signedURL") or signed.get("signedUrl")
         if signed_url:
-            return signed_url
+            return str(signed_url)
         raise HTTPException(status_code=500, detail="Could not generate signed URL.")
 
     def _remove_storage_paths(self, paths: list[str]) -> None:
@@ -123,32 +227,110 @@ class ConversionService:
         if unique_paths:
             self.supabase.storage.from_(self.bucket).remove(unique_paths)
 
-    def cleanup_artifacts(self) -> None:
-        now = datetime.now(timezone.utc)
-        history_cutoff = now - timedelta(days=self.history_retention_days)
+    def _upload_source_file(self, source_path: str, upload_file: UploadFile) -> None:
+        upload_stream = cast(Any, upload_file.file)
+        try:
+            upload_stream.seek(0)
+        except Exception:
+            pass
 
-        old_jobs_resp = (
-            self._table("conversion_jobs")
-            .select("id,created_at")
-            .lt("created_at", history_cutoff.isoformat())
-            .execute()
-        )
-        old_jobs = list(old_jobs_resp.data or [])
-        if not old_jobs:
+        upload_bytes = upload_stream.read()
+        if isinstance(upload_bytes, str):
+            upload_bytes = upload_bytes.encode("utf-8")
+        if not isinstance(upload_bytes, (bytes, bytearray)):
+            raise HTTPException(status_code=400, detail="Uploaded file content could not be read.")
+
+        self._upload_bytes(source_path, bytes(upload_bytes), upload_file.content_type or "application/octet-stream")
+
+    async def _process_conversion_file(
+        self,
+        file_info: dict[str, Any],
+        conversion_manager: ConversionManager,
+        io_semaphore: asyncio.Semaphore,
+        cpu_semaphore: asyncio.Semaphore,
+    ) -> dict[str, Any]:
+        file_row_id = file_info["id"]
+        batch_id = file_info["batch_id"]
+        file_id = file_info["file_id"]
+        source_path = file_info["source_path"]
+        source_ext = file_info["source_ext"]
+        target_format = file_info["target_format"]
+
+        try:
+            async with io_semaphore:
+                source_bytes = await asyncio.to_thread(self._download_bytes, source_path)
+
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_root = Path(temp_dir)
+                input_path = temp_root / f"input{source_ext}"
+                input_path.write_bytes(source_bytes)
+
+                async with cpu_semaphore:
+                    output_path_str = await asyncio.to_thread(
+                        conversion_manager.convert,
+                        str(input_path),
+                        source_ext,
+                        target_format,
+                        file_id,
+                    )
+
+                output_path = Path(output_path_str)
+                output_filename = self._build_output_filename(
+                    file_info["original_name"],
+                    target_format,
+                )
+                storage_output_path = self._storage_output_path(file_id, output_filename)
+                output_bytes = await asyncio.to_thread(output_path.read_bytes)
+
+            async with io_semaphore:
+                await asyncio.to_thread(
+                    self._upload_bytes,
+                    storage_output_path,
+                    output_bytes,
+                    "application/octet-stream",
+                )
+
+            self._update_file_row(
+                batch_id,
+                {"id": file_row_id},
+                {
+                    "status": "success",
+                    "output_path": storage_output_path,
+                    "output_filename": output_filename,
+                    "error": None,
+                },
+            )
+
+            return {
+                "status": "success",
+                "file_id": file_id,
+                "output_filename": output_filename,
+            }
+        except Exception as exc:
+            error_message = str(exc)
+            self._update_file_row(
+                batch_id,
+                {"id": file_row_id},
+                {
+                    "status": "failed",
+                    "error": error_message,
+                },
+            )
+
+            return {
+                "status": "failed",
+                "file_id": file_id,
+                "error": error_message,
+            }
+
+    def cleanup_artifacts(self) -> None:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(self._cleanup_artifacts_task())
             return
 
-        batch_ids = [job["id"] for job in old_jobs if job.get("id")]
-        for batch_id in batch_ids:
-            files = self._fetch_job_files(batch_id)
-            paths_to_remove = [
-                *(f.get("source_path") for f in files),
-                *(f.get("output_path") for f in files),
-            ]
-            self._remove_storage_paths([p for p in paths_to_remove if p])
-            self._table("conversion_job_files").delete().eq("batch_id", batch_id).execute()
-
-        if batch_ids:
-            self._table("conversion_jobs").delete().in_("id", batch_ids).execute()
+        self._schedule_cleanup_artifacts()
 
     @staticmethod
     def supported_formats() -> dict[str, Any]:
@@ -183,8 +365,6 @@ class ConversionService:
         target_format: str,
         file_ids: list[str] | None = None,
     ) -> dict[str, Any]:
-        self.cleanup_artifacts()
-
         if not files:
             raise HTTPException(status_code=400, detail="No files provided.")
 
@@ -195,6 +375,8 @@ class ConversionService:
             for provided_file_id in file_ids:
                 if not self._safe_file_id_re.fullmatch(provided_file_id):
                     raise HTTPException(status_code=400, detail="Invalid file_id format.")
+
+        self._schedule_cleanup_artifacts()
 
         batch_id = str(uuid.uuid4())
         first_filename = files[0].filename if files and files[0].filename else None
@@ -219,13 +401,6 @@ class ConversionService:
             source_name = file.filename or f"{file_id}.bin"
             source_ext = Path(source_name).suffix.lower()
             source_path = self._storage_upload_path(file_id, source_name)
-            payload = await file.read()
-
-            self.supabase.storage.from_(self.bucket).upload(
-                source_path,
-                payload,
-                {"content-type": file.content_type or "application/octet-stream", "upsert": "true"},
-            )
 
             file_rows.append(
                 {
@@ -247,91 +422,61 @@ class ConversionService:
         if file_rows:
             self._table("conversion_job_files").insert(file_rows).execute()
 
+        upload_tasks = [
+            asyncio.to_thread(self._upload_source_file, record["source_path"], upload_file)
+            for record, upload_file in zip(file_rows, files, strict=True)
+        ]
+        if upload_tasks:
+            upload_results = await asyncio.gather(*upload_tasks, return_exceptions=True)
+            for record, result in zip(file_rows, upload_results, strict=True):
+                if isinstance(result, Exception):
+                    self._update_file_row(
+                        batch_id,
+                        {"batch_id": batch_id, "file_id": record["file_id"]},
+                        {
+                            "status": "failed",
+                            "error": str(result),
+                        },
+                    )
+
         return {"batch_id": batch_id, "total": len(files), "status": "pending"}
 
     async def run_batch(self, batch_id: str):
         self._update_job(batch_id, {"status": ConversionStatus.PROCESSING.value, "error": None})
 
         files = self._fetch_job_files(batch_id)
-        if not files:
+        pending_files = [file_info for file_info in files if file_info.get("status") == ConversionStatus.PENDING.value]
+        if not pending_files:
             self._update_job(
                 batch_id,
                 {
                     "status": ConversionStatus.FAILED.value,
-                    "error": "No files found for batch.",
+                    "error": "No pending files found for batch.",
                 },
             )
             return
 
-        completed = 0
-        failed = 0
-        first_output_filename: str | None = None
+        io_semaphore = asyncio.Semaphore(min(8, len(pending_files)))
+        cpu_semaphore = asyncio.Semaphore(min(4, len(pending_files)))
 
-        for file_info in files:
-            file_row_id = file_info["id"]
-            file_id = file_info["file_id"]
-            source_path = file_info["source_path"]
-            source_ext = file_info["source_ext"]
-            target_format = file_info["target_format"]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            batch_temp_root = Path(temp_dir)
+            conversion_manager = ConversionManager(batch_temp_root, batch_temp_root)
 
-            try:
-                source_bytes = self.supabase.storage.from_(self.bucket).download(source_path)
-                if isinstance(source_bytes, str):
-                    source_bytes = source_bytes.encode("utf-8")
-
-                with tempfile.TemporaryDirectory() as temp_dir:
-                    temp_root = Path(temp_dir)
-                    input_path = temp_root / f"input{source_ext}"
-                    input_path.write_bytes(source_bytes)
-
-                    converter = ConversionManager(temp_root, temp_root)
-                    output_path_str = await asyncio.get_event_loop().run_in_executor(
-                        None,
-                        converter.convert,
-                        str(input_path),
-                        source_ext,
-                        target_format,
-                        file_id,
-                    )
-
-                    output_path = Path(output_path_str)
-                    output_filename = self._build_output_filename(
-                        file_info["original_name"],
-                        target_format,
-                    )
-                    storage_output_path = self._storage_output_path(file_id, output_filename)
-                    output_bytes = output_path.read_bytes()
-
-                self.supabase.storage.from_(self.bucket).upload(
-                    storage_output_path,
-                    output_bytes,
-                    {"content-type": "application/octet-stream", "upsert": "true"},
+            async def process_file(file_info: dict[str, Any]) -> dict[str, Any]:
+                return await self._process_conversion_file(
+                    file_info,
+                    conversion_manager,
+                    io_semaphore,
+                    cpu_semaphore,
                 )
 
-                self._table("conversion_job_files").update(
-                    {
-                        "status": "success",
-                        "output_path": storage_output_path,
-                        "output_filename": output_filename,
-                        "error": None,
-                        "updated_at": self._now_iso(),
-                    }
-                ).eq("id", file_row_id).execute()
+            results = await asyncio.gather(*(process_file(file_info) for file_info in pending_files))
 
-                if not first_output_filename:
-                    first_output_filename = output_filename
-                completed += 1
-            except Exception as exc:
-                failed += 1
-                self._table("conversion_job_files").update(
-                    {
-                        "status": "failed",
-                        "error": str(exc),
-                        "updated_at": self._now_iso(),
-                    }
-                ).eq("id", file_row_id).execute()
+        completed = sum(1 for result in results if result["status"] == "success")
+        failed = sum(1 for result in results if result["status"] == "failed")
 
-        if completed == len(files):
+        if completed == len(pending_files) and failed == 0:
             status = ConversionStatus.DONE.value
         elif completed == 0:
             status = ConversionStatus.FAILED.value
@@ -342,12 +487,16 @@ class ConversionService:
             batch_id,
             {
                 "status": status,
-                "output_filename": first_output_filename,
+                "output_filename": next((result.get("output_filename") for result in results if result.get("status") == "success"), None),
                 "error": None if completed > 0 else "All conversions failed.",
             },
         )
 
     def get_job(self, batch_id: str) -> dict[str, Any]:
+        cached_job = self._get_job_cache(batch_id)
+        if cached_job is not None:
+            return cached_job
+
         job_row = self._fetch_job_row(batch_id)
         files = self._fetch_job_files(batch_id)
         if not files:
@@ -412,7 +561,9 @@ class ConversionService:
             finished_at=finished_at,
             target_format=target_format,
         )
-        return job.model_dump()
+        payload = job.model_dump()
+        self._set_job_cache(batch_id, payload)
+        return payload
 
     def resolve_output_file(self, batch_id: str, file_id: str) -> dict[str, str]:
         result = (
@@ -423,7 +574,7 @@ class ConversionService:
             .single()
             .execute()
         )
-        row = result.data
+        row = cast(dict[str, Any] | None, result.data)
         if not row or row.get("status") != "success" or not row.get("output_path"):
             raise HTTPException(status_code=404, detail="Output file not found.")
 
@@ -447,7 +598,7 @@ class ConversionService:
             .execute()
         )
 
-        rows = list(result.data or [])
+        rows = cast(list[dict[str, Any]], result.data or [])
         if not rows:
             raise HTTPException(status_code=404, detail="File not found.")
 
@@ -473,28 +624,52 @@ class ConversionService:
             .limit(self.history_max_entries)
             .execute()
         )
-        jobs = list(jobs_resp.data or [])
+        jobs: list[dict[str, Any]] = []
+        for item in cast(list[Any], jobs_resp.data or []):
+            if isinstance(item, dict):
+                jobs.append(cast(dict[str, Any], item))
+
+        if not jobs:
+            return []
+
+        batch_ids = [str(job["id"]) for job in jobs]
+        files_resp = (
+            self._table("conversion_job_files")
+            .select("*")
+            .in_("batch_id", batch_ids)
+            .order("created_at")
+            .execute()
+        )
+        files_by_batch: dict[str, list[dict[str, Any]]] = {batch_id: [] for batch_id in batch_ids}
+        for item in cast(list[Any], files_resp.data or []):
+            if isinstance(item, dict):
+                file_item = cast(dict[str, Any], item)
+                batch_id = str(file_item.get("batch_id", ""))
+                if batch_id in files_by_batch:
+                    files_by_batch[batch_id].append(file_item)
 
         history: list[dict[str, Any]] = []
         for job in jobs:
-            files = self._fetch_job_files(job["id"])
+            job_id = str(job["id"])
+            files = files_by_batch.get(job_id, [])
             if not files:
                 continue
 
+            files.sort(key=lambda item: str(item.get("created_at", "")))
             completed = sum(1 for item in files if item.get("status") == "success")
             failed = sum(1 for item in files if item.get("status") == "failed")
             target_format = files[0]["target_format"] if files else ""
 
             history.append(
                 {
-                    "batch_id": job["id"],
+                    "batch_id": job_id,
                     "target_format": target_format,
                     "total": len(files),
                     "completed": completed,
                     "failed": failed,
                     "created_at": job["created_at"],
-                    "finished_at": job.get("updated_at"),
-                    "status": job["status"],
+                    "finished_at": cast(str | None, job.get("updated_at")),
+                    "status": str(job["status"]),
                     "files": [
                         {
                             "file_id": item["file_id"],
@@ -512,13 +687,21 @@ class ConversionService:
 
     def clear_history(self) -> None:
         files_resp = self._table("conversion_job_files").select("source_path,output_path").execute()
-        files = list(files_resp.data or [])
+        files: list[dict[str, Any]] = []
+        for item in cast(list[Any], files_resp.data or []):
+            if isinstance(item, dict):
+                files.append(cast(dict[str, Any], item))
 
-        paths = [
-            *(item.get("source_path") for item in files),
-            *(item.get("output_path") for item in files),
-        ]
-        self._remove_storage_paths([p for p in paths if p])
+        paths: list[str] = []
+        for item in files:
+            source_path = item.get("source_path")
+            output_path = item.get("output_path")
+            if source_path:
+                paths.append(str(source_path))
+            if output_path:
+                paths.append(str(output_path))
+
+        self._remove_storage_paths(paths)
 
         self._table("conversion_job_files").delete().neq("id", 0).execute()
         self._table("conversion_jobs").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
@@ -526,7 +709,7 @@ class ConversionService:
     def count_active_jobs(self) -> int:
         response = (
             self._table("conversion_jobs")
-            .select("id", count="exact")
+            .select("id", count=cast(Any, "exact"))
             .in_("status", [ConversionStatus.PENDING.value, ConversionStatus.PROCESSING.value])
             .execute()
         )
