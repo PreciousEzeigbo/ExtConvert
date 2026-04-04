@@ -31,6 +31,8 @@ export const metadata: Metadata = {
 export const revalidate = 3600;
 
 export default function Home() {
+  const currentYear = new Date().getFullYear();
+
   const webAppJsonLd = {
     '@context': 'https://schema.org',
     '@type': 'WebApplication',
@@ -53,7 +55,7 @@ export default function Home() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(webAppJsonLd) }}
       />
-      <HomeClient />
+      <HomeClient currentYear={currentYear} />
     </>
   );
 }

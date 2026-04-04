@@ -31,8 +31,8 @@ export const metadata: Metadata = {
     description: 'Batch file conversion built with FastAPI and React.',
   },
   icons: {
-    icon: '/favicon.ico',
-    apple: '/apple-icon.png',
+    icon: '/favicon.ico?v=3',
+    apple: '/apple-icon.png?v=3',
   },
 }
 

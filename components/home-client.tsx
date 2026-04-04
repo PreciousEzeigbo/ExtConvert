@@ -8,7 +8,11 @@ import { ConversionHistory } from '@/components/conversion-history';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { useConverter } from '@/hooks/use-converter';
 
-export function HomeClient() {
+interface HomeClientProps {
+  currentYear: number;
+}
+
+export function HomeClient({ currentYear }: HomeClientProps) {
   const [selectedType, setSelectedType] = useState('image-to-pdf');
   const [selectedImageFormat, setSelectedImageFormat] = useState('png');
 
@@ -186,6 +190,12 @@ export function HomeClient() {
           </aside>
         </div>
       </main>
+
+      <footer className="border-t border-border/50 py-5">
+        <div className="max-w-6xl mx-auto px-4 text-center text-sm text-muted-foreground">
+          &copy; {currentYear} ExtConvert. Your document converter.
+        </div>
+      </footer>
     </div>
   );
 }
