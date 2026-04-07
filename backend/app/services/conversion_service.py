@@ -327,6 +327,8 @@ class ConversionService:
                 "output_filename": output_filename,
             }
         except Exception as exc:
+            import traceback
+            traceback.print_exc()
             error_message = str(exc).lower()
             
             user_error = "Failed to convert file. The file may be corrupt or unsupported."

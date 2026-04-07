@@ -247,6 +247,7 @@ export function useConverter() {
               error: job.error,
             });
             addToHistory(job);
+            removeFromQueue(job.id);
           });
         } catch (error) {
           const errorMessage = toUserFacingError(error);
