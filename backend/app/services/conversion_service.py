@@ -148,12 +148,15 @@ class ConversionService:
         supabase_paths = [p for p in paths_to_remove if p and not p.startswith("/")]
         self._remove_storage_paths(supabase_paths)
         
+        safe_dir = self.base_dir.resolve()
         for p in paths_to_remove:
-            if p and p.startswith("/") and Path(p).exists():
-                try:
-                    Path(p).unlink()
-                except Exception:
-                    pass
+            if p and p.startswith("/"):
+                target = Path(p).resolve()
+                if target.exists() and target.is_relative_to(safe_dir):
+                    try:
+                        target.unlink()
+                    except Exception:
+                        pass
                     
         self._table("conversion_job_files").delete().eq("batch_id", batch_id).execute()
         self._table("conversion_jobs").delete().eq("id", batch_id).execute()
