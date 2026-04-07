@@ -27,6 +27,12 @@ async def convert_batch(
     file_ids: list[str] | None = Form(default=None),
     target_format: str = "pdf",
 ) -> dict[str, Any]:
+    if len(files) > 50:
+        raise HTTPException(
+            status_code=413,
+            detail="Maximum batch size exceeded. Please upload a maximum of 50 files at a time."
+        )
+        
     for file in files:
         if getattr(file, "size", 0) > MAX_FILE_SIZE:
             raise HTTPException(
