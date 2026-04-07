@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import { AlertCircle, CheckCircle2, Clock3, Download, DownloadCloud, File, Loader2, RefreshCw, Trash2 } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Clock3, Download, DownloadCloud, File, Loader2, RefreshCw, Trash2, Play } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ConversionJob } from './conversion-queue';
@@ -14,6 +14,7 @@ interface ConversionHistoryProps {
   onDownloadAll: (batchId: string) => void;
   onRetry: (jobId: string) => void;
   onRemoveFromQueue: (jobId: string) => void;
+  onRemoveFromHistory?: (jobId: string) => void;
   onClearHistory: () => void;
   isConverting?: boolean;
 }
@@ -89,6 +90,7 @@ export function ConversionHistory({
   onDownloadAll,
   onRetry,
   onRemoveFromQueue,
+  onRemoveFromHistory,
   onClearHistory,
   isConverting = false,
 }: ConversionHistoryProps) {
@@ -206,140 +208,179 @@ export function ConversionHistory({
           const processingCount = group.jobs.filter(job => job.status === 'processing').length;
 
           return (
-          <section key={group.key} className="space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  {group.label}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {completedCount > 0 ? `${completedCount} completed` : ''}
-                  {completedCount > 0 && failedCount > 0 ? ', ' : ''}
-                  {failedCount > 0 ? `${failedCount} failed` : ''}
-                  {completedCount === 0 && failedCount === 0 && pendingCount > 0 ? `${pendingCount} pending` : ''}
-                  {processingCount > 0 ? `${pendingCount > 0 || completedCount > 0 || failedCount > 0 ? ', ' : ''}${processingCount} processing` : ''}
-                </p>
+            <section key={group.key} className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    {group.label}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {completedCount > 0 ? `${completedCount} completed` : ''}
+                    {completedCount > 0 && failedCount > 0 ? ', ' : ''}
+                    {failedCount > 0 ? `${failedCount} failed` : ''}
+                    {completedCount === 0 && failedCount === 0 && pendingCount > 0 ? `${pendingCount} pending` : ''}
+                    {processingCount > 0 ? `${pendingCount > 0 || completedCount > 0 || failedCount > 0 ? ', ' : ''}${processingCount} processing` : ''}
+                  </p>
+                </div>
+
+                {completedCount > 1 && group.key.startsWith('live:') === false && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onDownloadAll(group.key)}
+                    className="border-primary/30 bg-primary/5 text-primary hover:bg-primary/10"
+                  >
+                    <DownloadCloud className="w-4 h-4 mr-2" />
+                    Download all
+                  </Button>
+                )}
               </div>
 
-              {completedCount > 1 && group.key.startsWith('live:') === false && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onDownloadAll(group.key)}
-                  className="border-primary/30 bg-primary/5 text-primary hover:bg-primary/10"
-                >
-                  <DownloadCloud className="w-4 h-4 mr-2" />
-                  Download all
-                </Button>
-              )}
-            </div>
-
-            <div className="space-y-3">
-              {group.jobs.map(job => (
-                <article
-                  key={job.id}
-                  className={`rounded-xl border p-4 shadow-sm transition-all ${rowTone(job.status)}`}
-                >
-                  <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-center">
-                    <div className="min-w-0 space-y-2">
-                      <div className="flex items-start gap-3">
-                        <span className="mt-1 inline-flex h-7 w-7 items-center justify-center rounded-full bg-background/80 text-foreground shadow-sm ring-1 ring-black/5 dark:ring-white/5">
-                          {rowIcon(job)}
-                        </span>
-                        <div className="min-w-0 flex-1 space-y-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <h4 className="truncate text-sm font-semibold text-foreground">
-                              {job.fileName}
-                            </h4>
-                            <Badge variant="outline" className="uppercase tracking-wide">
-                              {job.toFormat.toUpperCase()}
-                            </Badge>
-                            {job.downloaded && job.status === 'completed' && (
-                              <Badge variant="secondary" className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
-                                Downloaded
+              <div className="space-y-3">
+                {group.jobs.map(job => (
+                  <article
+                    key={job.id}
+                    className={`rounded-xl border p-4 shadow-sm transition-all ${rowTone(job.status)}`}
+                  >
+                    <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-center">
+                      <div className="min-w-0 space-y-2">
+                        <div className="flex items-start gap-3">
+                          <span className="mt-1 inline-flex h-7 w-7 items-center justify-center rounded-full bg-background/80 text-foreground shadow-sm ring-1 ring-black/5 dark:ring-white/5">
+                            {rowIcon(job)}
+                          </span>
+                          <div className="min-w-0 flex-1 space-y-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h4 className="truncate text-sm font-semibold text-foreground">
+                                {job.fileName}
+                              </h4>
+                              <Badge variant="outline" className="uppercase tracking-wide">
+                                {job.toFormat.toUpperCase()}
                               </Badge>
-                            )}
-                            <Badge variant={job.status === 'failed' ? 'destructive' : 'secondary'}>
-                              {rowStatusLabel(job)}
-                            </Badge>
-                          </div>
+                              {job.downloaded && job.status === 'completed' && (
+                                <Badge variant="secondary" className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                                  Downloaded
+                                </Badge>
+                              )}
+                              <Badge variant={job.status === 'failed' ? 'destructive' : 'secondary'}>
+                                {rowStatusLabel(job)}
+                              </Badge>
+                            </div>
 
-                          {job.status === 'processing' && job.progress !== undefined && (
-                            <div className="space-y-1">
-                              <div className="h-2 w-full overflow-hidden rounded-full bg-border/70">
-                                <div
-                                  className="h-full progress-stripes transition-all duration-500"
-                                  style={{ width: `${job.progress}%` }}
-                                />
+                            {job.status === 'processing' && job.progress !== undefined && (
+                              <div className="space-y-1">
+                                <div className="h-2 w-full overflow-hidden rounded-full bg-border/70">
+                                  <div
+                                    className="h-full progress-stripes transition-all duration-500 bg-primary"
+                                    style={{ width: `${job.progress}%` }}
+                                  />
+                                </div>
+                                <p className="text-xs text-muted-foreground font-medium">
+                                  {job.progress <= 40 ? 'Uploading' : 'Converting'}... {job.progress}%
+                                </p>
                               </div>
-                              <p className="text-xs text-muted-foreground">Processing conversion...</p>
-                            </div>
-                          )}
+                            )}
 
-                          {job.status === 'pending' && (
-                            <p className="text-xs text-muted-foreground">Waiting to start conversion.</p>
-                          )}
+                            {job.status === 'pending' && (
+                              <p className="text-xs text-muted-foreground">Waiting to start conversion.</p>
+                            )}
 
-                          {job.status === 'completed' && (
-                            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                              <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-300">
-                                <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                                Converted
-                              </span>
-                              <span>•</span>
-                              <span>{formatFileSize(job.outputSize)}</span>
-                            </div>
-                          )}
+                            {job.status === 'completed' && (
+                              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-300">
+                                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                                  Converted
+                                </span>
+                                <span>•</span>
+                                <span>{formatFileSize(job.outputSize)}</span>
+                              </div>
+                            )}
 
-                          {job.status === 'failed' && (
-                            <p className="text-sm text-red-700 dark:text-red-300">
-                              {job.error || 'Conversion failed.'}
-                            </p>
-                          )}
+                            {job.status === 'failed' && (
+                              <p className="text-sm text-red-700 dark:text-red-300">
+                                {job.error || 'Conversion failed.'}
+                              </p>
+                            )}
+                          </div>
                         </div>
                       </div>
+
+                      <div className="flex w-full flex-col gap-2 md:w-[11rem]">
+                        {job.status === 'completed' && (
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              onClick={() => onDownload(job.id)}
+                              className="h-11 flex-1 bg-foreground text-background hover:bg-foreground/90"
+                            >
+                              <Download className="w-4 h-4 mr-2" />
+                              Download
+                            </Button>
+                            {onRemoveFromHistory && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => onRemoveFromHistory(job.id)}
+                                className="h-11 w-11 p-0 border-destructive/40 text-destructive hover:bg-red-100/80 hover:text-destructive/90 shrink-0"
+                                title="Clear File"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            )}
+                          </div>
+                        )}
+
+                        {job.status === 'failed' && (
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              onClick={() => onRetry(job.id)}
+                              className="h-11 flex-1 bg-red-600 text-white hover:bg-red-700"
+                            >
+                              <RefreshCw className="w-4 h-4 mr-2" />
+                              Retry
+                            </Button>
+                            {onRemoveFromHistory && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => onRemoveFromHistory(job.id)}
+                                className="h-11 w-11 p-0 border-destructive/40 text-destructive hover:bg-red-100/80 hover:text-destructive/90 shrink-0"
+                                title="Clear File"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            )}
+                          </div>
+                        )}
+
+                        {job.status === 'pending' && (
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              onClick={() => onConvert([job.id])}
+                              disabled={isConverting}
+                              className="h-11 flex-1 bg-primary text-primary-foreground hover:bg-primary/90"
+                            >
+                              <Play className="w-4 h-4 mr-2" />
+                              Convert
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => onRemoveFromQueue(job.id)}
+                              className="h-11 w-11 p-0 border-destructive/40 text-destructive hover:bg-red-100/80 hover:text-destructive/90 shrink-0"
+                              title="Remove File"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        )}
+                      </div>
                     </div>
-
-                    <div className="flex w-full flex-col gap-2 md:w-[11rem]">
-                      {job.status === 'completed' && (
-                        <Button
-                          size="sm"
-                          onClick={() => onDownload(job.id)}
-                          className="h-11 w-full bg-foreground text-background hover:bg-foreground/90"
-                        >
-                          <Download className="w-4 h-4 mr-2" />
-                          Download
-                        </Button>
-                      )}
-
-                      {job.status === 'failed' && (
-                        <Button
-                          size="sm"
-                          onClick={() => onRetry(job.id)}
-                          className="h-11 w-full bg-red-600 text-white hover:bg-red-700"
-                        >
-                          <RefreshCw className="w-4 h-4 mr-2" />
-                          Retry
-                        </Button>
-                      )}
-
-                      {job.status === 'pending' && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => onRemoveFromQueue(job.id)}
-                          className="h-11 w-full border-destructive/40 text-destructive hover:bg-red-100/80 hover:text-destructive/90"
-                        >
-                          <Trash2 className="w-4 h-4 mr-2" />
-                          Remove
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </article>
-              ))}
-            </div>
-          </section>
+                  </article>
+                ))}
+              </div>
+            </section>
           );
         })}
       </div>

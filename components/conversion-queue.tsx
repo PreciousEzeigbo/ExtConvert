@@ -1,6 +1,6 @@
 'use client';
 
-import { File, Download, Loader2, CheckCircle2, AlertCircle, Trash2 } from 'lucide-react';
+import { File, Download, Loader2, CheckCircle2, AlertCircle, Trash2, Play } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 export interface ConversionJob {
@@ -78,7 +78,7 @@ export function ConversionQueue({
       <div className="flex-shrink-0">
         {getStatusIcon(job.status)}
       </div>
-      
+
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium text-foreground truncate">{job.fileName}</p>
         <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
@@ -86,16 +86,21 @@ export function ConversionQueue({
           <span>→</span>
           <span>{job.toFormat.toUpperCase()}</span>
         </div>
-        
+
         {job.status === 'processing' && job.progress !== undefined && (
-          <div className="mt-2 w-full bg-border/70 rounded-full h-2 overflow-hidden">
-            <div
-              className="h-full progress-stripes transition-all duration-500"
-              style={{ width: `${job.progress}%` }}
-            />
+          <div className="mt-1 space-y-1">
+            <div className="mt-2 w-full bg-border/70 rounded-full h-2 overflow-hidden">
+              <div
+                className="h-full progress-stripes transition-all duration-500 bg-primary"
+                style={{ width: `${job.progress}%` }}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground font-medium">
+              {job.progress <= 40 ? 'Uploading' : 'Converting'}... {job.progress}%
+            </p>
           </div>
         )}
-        
+
         {job.status === 'failed' && job.error && (
           <p className="text-xs text-destructive mt-1">{job.error}</p>
         )}
@@ -113,17 +118,31 @@ export function ConversionQueue({
             <Download className="w-4 h-4" />
           </Button>
         )}
-        
+
         {(job.status === 'pending' || job.status === 'failed') && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => onRemove(job.id)}
-            className="h-8 w-8 p-0 text-destructive border-destructive/40 hover:text-destructive hover:border-destructive/60 hover:bg-red-100/80 dark:hover:bg-red-900/35"
-            title="Remove"
-          >
-            <Trash2 className="w-4 h-4" />
-          </Button>
+          <>
+            {job.status === 'pending' && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onConvert([job.id])}
+                disabled={isConverting}
+                className="h-8 w-8 p-0 text-primary border-primary/40 hover:text-primary hover:border-primary/60 hover:bg-primary/10"
+                title="Convert File"
+              >
+                <Play className="w-4 h-4 ml-0.5" />
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => onRemove(job.id)}
+              className="h-8 w-8 p-0 text-destructive border-destructive/40 hover:text-destructive hover:border-destructive/60 hover:bg-red-100/80 dark:hover:bg-red-900/35"
+              title="Remove"
+            >
+              <Trash2 className="w-4 h-4" />
+            </Button>
+          </>
         )}
       </div>
     </div>

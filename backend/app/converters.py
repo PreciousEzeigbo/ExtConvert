@@ -34,8 +34,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_LEFT
 from reportlab.pdfgen import canvas
 
-import pypdf
-from pdf2image import convert_from_path
+import fitz  # PyMuPDF
 
 # ── DOCX ───────────────────────────────────────────────────────────────────────
 import docx
@@ -161,49 +160,62 @@ class ConversionManager:
     # PDF converters
     # ──────────────────────────────────────────────────────────────────────────
     def _pdf_to_image(self, src: str, out: str, fmt: str) -> str:
-        pages = convert_from_path(src, dpi=150)
-        if not pages:
+        doc = fitz.open(src)
+        if not doc:
             raise ValueError("PDF has no renderable pages.")
 
-        if len(pages) == 1:
-            img = pages[0]
+        if len(doc) == 1:
+            page = doc[0]
+            pix = page.get_pixmap(dpi=150)
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
             save_fmt = "JPEG" if fmt in {"jpg", "jpeg"} else ("WEBP" if fmt == "webp" else "PNG")
             img.save(out, save_fmt)
         else:
             # Multi-page: stitch vertically
-            widths  = [p.width  for p in pages]
-            heights = [p.height for p in pages]
+            heights = []
+            widths = []
+            pixs = []
+            for page in doc:
+                pix = page.get_pixmap(dpi=150)
+                pixs.append(pix)
+                widths.append(pix.width)
+                heights.append(pix.height)
+
             total_h = sum(heights)
-            max_w   = max(widths)
+            max_w = max(widths)
             combined = Image.new("RGB", (max_w, total_h), (255, 255, 255))
             y_off = 0
-            for pg in pages:
-                combined.paste(pg, (0, y_off))
-                y_off += pg.height
+            for pix in pixs:
+                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                combined.paste(img, (0, y_off))
+                y_off += pix.height
             save_fmt = "JPEG" if fmt in {"jpg", "jpeg"} else ("WEBP" if fmt == "webp" else "PNG")
             combined.save(out, save_fmt)
+        doc.close()
         return out
 
     def _pdf_to_txt(self, src: str, out: str) -> str:
-        reader = pypdf.PdfReader(src)
+        doc = fitz.open(src)
         lines = []
-        for i, page in enumerate(reader.pages):
-            text = page.extract_text() or ""
+        for i, page in enumerate(doc):
+            text = page.get_text() or ""
             lines.append(f"── Page {i + 1} ──\n{text}\n")
         Path(out).write_text("\n".join(lines), encoding="utf-8")
+        doc.close()
         return out
 
     def _pdf_to_docx(self, src: str, out: str) -> str:
-        reader = pypdf.PdfReader(src)
+        doc_pdf = fitz.open(src)
         doc = Document()
         doc.add_heading("Converted PDF", level=1)
-        for i, page in enumerate(reader.pages):
-            text = page.extract_text() or ""
+        for i, page in enumerate(doc_pdf):
+            text = page.get_text() or ""
             doc.add_heading(f"Page {i + 1}", level=2)
             for para in text.split("\n"):
                 if para.strip():
                     doc.add_paragraph(para.strip())
         doc.save(out)
+        doc_pdf.close()
         return out
 
     # ──────────────────────────────────────────────────────────────────────────

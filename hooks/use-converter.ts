@@ -166,12 +166,25 @@ export function useConverter() {
             files: fileEntries.map(entry => entry.file),
             fileIds: fileEntries.map(entry => entry.job.fileId),
             targetFormat,
+            onUploadProgress: (percent) => {
+              const uiProgress = Math.round(percent * 0.4);
+              fileEntries.forEach(({ job }) => updateJobStatus(job.id, 'processing', { progress: uiProgress }));
+            }
           }));
 
-          fileEntries.forEach(({ job }) => updateJobStatus(job.id, 'processing', { progress: 50, batchId }));
+          fileEntries.forEach(({ job }) => updateJobStatus(job.id, 'processing', { progress: 40, batchId }));
 
           const backendJob = await pollJobUntilFinished(batchId, {
             signal: activePollController.current?.signal,
+            onProgress: (stream) => {
+              stream.files.forEach((f) => {
+                const matchedJob = fileEntries.find(entry => entry.job.fileId === f.file_id)?.job;
+                if (matchedJob) {
+                  const uiProgress = 40 + Math.round(f.progress * 0.6);
+                  updateJobStatus(matchedJob.id, 'processing', { progress: uiProgress });
+                }
+              });
+            }
           });
           const resultByFileId = new Map(backendJob.results.map(result => [result.file_id, result]));
 
@@ -221,7 +234,7 @@ export function useConverter() {
             toast({
               title: 'Conversion completed',
               description: `${job.fileName} is ready for download.`,
-              className: 'completion-toast text-foreground',
+              className: 'bg-green-50 text-green-900 border-green-200 dark:bg-green-950/40 dark:text-green-300 dark:border-green-900',
             });
 
             addToHistory(job);

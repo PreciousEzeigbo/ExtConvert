@@ -12,11 +12,10 @@ dependencies = [
     "httpx",
     "supabase",
     "pillow",
-    "pypdf",
-    "pdf2image",
     "python-docx",
     "reportlab",
     "pytesseract",
+    "pymupdf>=1.27.2.2",
 ]
 
 [build-system]

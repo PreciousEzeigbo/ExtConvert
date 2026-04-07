@@ -22,6 +22,7 @@ export function HomeClient({ currentYear }: HomeClientProps) {
     isConverting,
     addToQueue,
     removeFromQueue,
+    removeFromHistory,
     convertFiles,
     downloadFile,
     downloadAll,
@@ -104,6 +105,7 @@ export function HomeClient({ currentYear }: HomeClientProps) {
               onDownloadAll={downloadAll}
               onRetry={retryHistoryJob}
               onRemoveFromQueue={removeFromQueue}
+              onRemoveFromHistory={removeFromHistory}
               onClearHistory={clearHistory}
               isConverting={isConverting}
             />

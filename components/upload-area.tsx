@@ -3,6 +3,9 @@
 import { useState, useRef } from 'react';
 import { Upload, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { toast } from '@/hooks/use-toast';
+
+const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
 
 interface UploadAreaProps {
   onFilesSelected: (files: File[]) => void;
@@ -12,7 +15,6 @@ interface UploadAreaProps {
 
 export function UploadArea({ onFilesSelected, acceptedFormats, isLoading = false }: UploadAreaProps) {
   const [isDragging, setIsDragging] = useState(false);
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -27,7 +29,7 @@ export function UploadArea({ onFilesSelected, acceptedFormats, isLoading = false
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    
+
     const files = Array.from(e.dataTransfer.files);
     handleFilesSelected(files);
   };
@@ -38,15 +40,28 @@ export function UploadArea({ onFilesSelected, acceptedFormats, isLoading = false
   };
 
   const handleFilesSelected = (files: File[]) => {
-    const newFiles = [...selectedFiles, ...files];
-    setSelectedFiles(newFiles);
-    onFilesSelected(newFiles);
-  };
+    const validFiles: File[] = [];
+    const invalidFiles: string[] = [];
 
-  const removeFile = (index: number) => {
-    const updated = selectedFiles.filter((_, i) => i !== index);
-    setSelectedFiles(updated);
-    onFilesSelected(updated);
+    files.forEach(file => {
+      if (file.size > MAX_FILE_SIZE) {
+        invalidFiles.push(file.name);
+      } else {
+        validFiles.push(file);
+      }
+    });
+
+    if (invalidFiles.length > 0) {
+      toast({
+        title: 'File too large',
+        description: `Skipped ${invalidFiles.length} file(s) over 100MB limit.`,
+        className: 'bg-red-50 text-red-900 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900',
+      });
+    }
+
+    if (validFiles.length > 0) {
+      onFilesSelected(validFiles);
+    }
   };
 
   const acceptString = acceptedFormats.join(',');
@@ -58,11 +73,10 @@ export function UploadArea({ onFilesSelected, acceptedFormats, isLoading = false
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         onClick={() => fileInputRef.current?.click()}
-        className={`relative border-2 border-dashed rounded-lg p-12 text-center cursor-pointer transition-all ${
-          isDragging
-            ? 'border-primary bg-primary/5'
-            : 'border-border hover:border-primary/50 bg-muted/30 hover:bg-muted/50'
-        } ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+        className={`relative border-2 border-dashed rounded-lg p-12 text-center cursor-pointer transition-all ${isDragging
+          ? 'border-primary bg-primary/5'
+          : 'border-border hover:border-primary/50 bg-muted/30 hover:bg-muted/50'
+          } ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
       >
         <input
           ref={fileInputRef}
@@ -73,7 +87,7 @@ export function UploadArea({ onFilesSelected, acceptedFormats, isLoading = false
           className="hidden"
           disabled={isLoading}
         />
-        
+
         <div className="flex flex-col items-center gap-3">
           <div className="rounded-full bg-primary/10 p-3">
             <Upload className="w-6 h-6 text-primary" />
@@ -92,33 +106,6 @@ export function UploadArea({ onFilesSelected, acceptedFormats, isLoading = false
         </div>
       </div>
 
-      {selectedFiles.length > 0 && (
-        <div className="space-y-2">
-          <h3 className="text-sm font-medium text-foreground">Selected Files ({selectedFiles.length})</h3>
-          <div className="space-y-2 max-h-48 overflow-y-auto">
-            {selectedFiles.map((file, index) => (
-              <div
-                key={`${file.name}-${index}`}
-                className="flex items-center justify-between p-3 bg-card border border-border rounded-lg"
-              >
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">{file.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {(file.size / 1024 / 1024).toFixed(2)} MB
-                  </p>
-                </div>
-                <button
-                  onClick={() => removeFile(index)}
-                  disabled={isLoading}
-                  className="ml-2 rounded p-1.5 text-destructive/80 transition-all hover:bg-red-100/85 hover:text-destructive dark:hover:bg-red-900/35 disabled:opacity-50"
-                >
-                  <X className="w-4 h-4 text-destructive" />
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

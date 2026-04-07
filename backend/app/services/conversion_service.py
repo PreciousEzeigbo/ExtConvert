@@ -26,6 +26,7 @@ class ConversionService:
         self.storage_backend = "supabase"
 
         self._job_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._progress_cache: dict[str, int] = {}
         self._cleanup_task: asyncio.Task[None] | None = None
 
         self.upload_ttl_hours = self._int_env("DOC_CONVERT_UPLOAD_TTL_HOURS", 1)
@@ -143,7 +144,17 @@ class ConversionService:
             *(f.get("source_path") for f in files),
             *(f.get("output_path") for f in files),
         ]
-        self._remove_storage_paths([p for p in paths_to_remove if p])
+        
+        supabase_paths = [p for p in paths_to_remove if p and not p.startswith("/")]
+        self._remove_storage_paths(supabase_paths)
+        
+        for p in paths_to_remove:
+            if p and p.startswith("/") and Path(p).exists():
+                try:
+                    Path(p).unlink()
+                except Exception:
+                    pass
+                    
         self._table("conversion_job_files").delete().eq("batch_id", batch_id).execute()
         self._table("conversion_jobs").delete().eq("id", batch_id).execute()
         self._invalidate_job_cache(batch_id)
@@ -227,7 +238,7 @@ class ConversionService:
         if unique_paths:
             self.supabase.storage.from_(self.bucket).remove(unique_paths)
 
-    def _upload_source_file(self, source_path: str, upload_file: UploadFile) -> None:
+    def _save_source_file_locally(self, local_path: str, upload_file: UploadFile) -> None:
         upload_stream = cast(Any, upload_file.file)
         try:
             upload_stream.seek(0)
@@ -240,7 +251,9 @@ class ConversionService:
         if not isinstance(upload_bytes, (bytes, bytearray)):
             raise HTTPException(status_code=400, detail="Uploaded file content could not be read.")
 
-        self._upload_bytes(source_path, bytes(upload_bytes), upload_file.content_type or "application/octet-stream")
+        target_path = Path(local_path)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_bytes(bytes(upload_bytes))
 
     async def _process_conversion_file(
         self,
@@ -257,15 +270,20 @@ class ConversionService:
         target_format = file_info["target_format"]
 
         try:
-            async with io_semaphore:
-                source_bytes = await asyncio.to_thread(self._download_bytes, source_path)
+            if source_path.startswith("/"):
+                 source_bytes = await asyncio.to_thread(Path(source_path).read_bytes)
+            else:
+                 async with io_semaphore:
+                     source_bytes = await asyncio.to_thread(self._download_bytes, source_path)
 
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_root = Path(temp_dir)
                 input_path = temp_root / f"input{source_ext}"
                 input_path.write_bytes(source_bytes)
 
+                self._progress_cache[file_id] = 10
                 async with cpu_semaphore:
+                    self._progress_cache[file_id] = 30
                     output_path_str = await asyncio.to_thread(
                         conversion_manager.convert,
                         str(input_path),
@@ -274,6 +292,7 @@ class ConversionService:
                         file_id,
                     )
 
+                self._progress_cache[file_id] = 80
                 output_path = Path(output_path_str)
                 output_filename = self._build_output_filename(
                     file_info["original_name"],
@@ -301,26 +320,37 @@ class ConversionService:
                 },
             )
 
+            self._progress_cache[file_id] = 100
             return {
                 "status": "success",
                 "file_id": file_id,
                 "output_filename": output_filename,
             }
         except Exception as exc:
-            error_message = str(exc)
+            error_message = str(exc).lower()
+            
+            user_error = "Failed to convert file. The file may be corrupt or unsupported."
+            if "password" in error_message or "encrypt" in error_message:
+                user_error = "The document is password-protected or encrypted."
+            elif "renderable" in error_message:
+                user_error = "The document has no pages that can be rendered."
+            elif "permission" in error_message:
+                user_error = "Permission denied to read this file."
+                
             self._update_file_row(
                 batch_id,
                 {"id": file_row_id},
                 {
                     "status": "failed",
-                    "error": error_message,
+                    "error": user_error,
                 },
             )
 
+            self._progress_cache[file_id] = 100
             return {
                 "status": "failed",
                 "file_id": file_id,
-                "error": error_message,
+                "error": user_error,
             }
 
     def cleanup_artifacts(self) -> None:
@@ -400,7 +430,9 @@ class ConversionService:
 
             source_name = file.filename or f"{file_id}.bin"
             source_ext = Path(source_name).suffix.lower()
-            source_path = self._storage_upload_path(file_id, source_name)
+            
+            # Use local disk rather than Supabase storage
+            local_path = str(self.base_dir / "uploads" / f"{batch_id}" / f"{file_id}{source_ext}")
 
             file_rows.append(
                 {
@@ -408,7 +440,7 @@ class ConversionService:
                     "file_id": file_id,
                     "original_name": source_name,
                     "source_ext": source_ext,
-                    "source_path": source_path,
+                    "source_path": local_path,
                     "target_format": target_format,
                     "status": ConversionStatus.PENDING.value,
                     "output_path": None,
@@ -423,7 +455,7 @@ class ConversionService:
             self._table("conversion_job_files").insert(file_rows).execute()
 
         upload_tasks = [
-            asyncio.to_thread(self._upload_source_file, record["source_path"], upload_file)
+            asyncio.to_thread(self._save_source_file_locally, record["source_path"], upload_file)
             for record, upload_file in zip(file_rows, files, strict=True)
         ]
         if upload_tasks:
@@ -608,6 +640,33 @@ class ConversionService:
             "url": self._create_signed_url(str(row["output_path"])),
             "filename": row.get("output_filename") or filename,
         }
+
+    async def stream_job_progress(self, batch_id: str):
+        while True:
+            job_row = self._fetch_job_row(batch_id)
+            if job_row["status"] in {ConversionStatus.DONE.value, ConversionStatus.FAILED.value}:
+                break
+                
+            files = self._fetch_job_files(batch_id)
+            file_progress = []
+            for f in files:
+                fid = f["file_id"]
+                if f["status"] == "success" or f["status"] == "failed":
+                    file_progress.append({"file_id": fid, "progress": 100, "status": f["status"]})
+                else:
+                    progress = self._progress_cache.get(fid, 0)
+                    file_progress.append({"file_id": fid, "progress": progress, "status": "processing"})
+                    
+            yield f"data: {__import__('json').dumps({'status': job_row['status'], 'files': file_progress})}\n\n"
+            await asyncio.sleep(0.5)
+            
+        # Final state
+        files = self._fetch_job_files(batch_id)
+        file_progress = [
+            {"file_id": f["file_id"], "progress": 100, "status": f["status"]}
+            for f in files
+        ]
+        yield f"data: {__import__('json').dumps({'status': job_row['status'], 'files': file_progress})}\n\n"
 
     def load_history(self) -> list[dict[str, Any]]:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=self.history_retention_days)).isoformat()

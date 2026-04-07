@@ -31,25 +31,51 @@ export async function startBatchConversion(params: {
   files: File[];
   fileIds: string[];
   targetFormat: string;
+  onUploadProgress?: (percent: number) => void;
 }): Promise<{ batchId: string }> {
-  const formData = new FormData();
-  params.files.forEach(file => formData.append('files', file));
-  params.fileIds.forEach(fileId => formData.append('file_ids', fileId));
+  return new Promise((resolve, reject) => {
+    const formData = new FormData();
+    params.files.forEach(file => formData.append('files', file));
+    params.fileIds.forEach(fileId => formData.append('file_ids', fileId));
 
-  const response = await fetch(
-    `${API_BASE_URL}/api/convert/batch?target_format=${encodeURIComponent(params.targetFormat)}`,
-    {
-      method: 'POST',
-      body: formData,
-    }
-  );
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_BASE_URL}/api/convert/batch?target_format=${encodeURIComponent(params.targetFormat)}`);
 
-  if (!response.ok) {
-    throw new Error('Failed to start conversion batch.');
-  }
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && params.onUploadProgress) {
+        const percent = Math.round((event.loaded / event.total) * 100);
+        params.onUploadProgress(percent);
+      }
+    };
 
-  const data = (await response.json()) as { batch_id: string };
-  return { batchId: data.batch_id };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const data = JSON.parse(xhr.responseText);
+          resolve({ batchId: data.batch_id });
+        } catch (e) {
+          reject(new Error('Invalid response from server'));
+        }
+      } else {
+        try {
+          const errData = JSON.parse(xhr.responseText);
+          if (errData && typeof errData.detail === 'string') {
+            reject(new Error(errData.detail));
+            return;
+          } else if (errData && Array.isArray(errData.detail) && errData.detail[0]?.msg) {
+            reject(new Error(errData.detail[0].msg));
+            return;
+          }
+        } catch (e) {
+          // ignore parse error block
+        }
+        reject(new Error('Failed to start conversion batch.'));
+      }
+    };
+
+    xhr.onerror = () => reject(new Error('Network error during upload.'));
+    xhr.send(formData);
+  });
 }
 
 export async function fetchConversionJob(batchId: string, signal?: AbortSignal): Promise<BackendJob> {

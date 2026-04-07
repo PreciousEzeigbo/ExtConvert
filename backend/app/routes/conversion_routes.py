@@ -1,6 +1,8 @@
-from fastapi import APIRouter, BackgroundTasks, File, Form, UploadFile
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, BackgroundTasks, File, Form, UploadFile, HTTPException
+from fastapi.responses import RedirectResponse, StreamingResponse
 from typing import Any
+
+MAX_FILE_SIZE = 100 * 1024 * 1024
 
 from backend.app.services import conversion_service
 
@@ -25,6 +27,13 @@ async def convert_batch(
     file_ids: list[str] | None = Form(default=None),
     target_format: str = "pdf",
 ) -> dict[str, Any]:
+    for file in files:
+        if getattr(file, "size", 0) > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File '{file.filename}' exceeds the maximum allowed size of 100MB."
+            )
+            
     result = await conversion_service.create_batch_job(files, target_format, file_ids=file_ids)
     background_tasks.add_task(conversion_service.run_batch, str(result["batch_id"]))
     return result
@@ -33,6 +42,14 @@ async def convert_batch(
 @router.get("/api/jobs/{batch_id}")
 async def get_job_status(batch_id: str):
     return conversion_service.get_job(batch_id)
+
+
+@router.get("/api/jobs/{batch_id}/stream")
+async def stream_job_status(batch_id: str):
+    return StreamingResponse(
+        conversion_service.stream_job_progress(batch_id),
+        media_type="text/event-stream"
+    )
 
 
 @router.get("/api/jobs/{batch_id}/download/{file_id}")
