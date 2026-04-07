@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ConversionJob } from '@/components/conversion-queue';
 
-const STORAGE_KEY = 'converter-history';
-const QUEUE_KEY = 'converter-queue';
+const STORAGE_KEY = 'converter-history-v2';
+const QUEUE_KEY = 'converter-queue-v2';
 
 function reviveJobs(raw: string | null): ConversionJob[] {
   if (!raw) {
