@@ -61,7 +61,7 @@ export function FormatSelector({
     <div className="space-y-4">
       <div className="grid grid-cols-1 gap-4">
         <div>
-          <label className="text-sm font-medium text-foreground mb-2 block">
+          <label className="font-label text-[11px] text-muted-foreground mb-2 block">
             Select Conversion Type
           </label>
           <Select value={selectedType} onValueChange={onTypeChange}>
@@ -79,16 +79,16 @@ export function FormatSelector({
         </div>
 
         {currentType && (
-          <div className="flex items-center justify-between p-4 bg-muted/30 rounded-lg border border-border">
+          <div className="flex items-center justify-between p-4 bg-card rounded-md border border-border">
             <div className="text-center flex-1">
-              <p className="text-sm text-muted-foreground mb-1">From</p>
+              <p className="font-label text-[11px] text-muted-foreground mb-1">From</p>
               <p className="text-lg font-semibold text-foreground">{currentType.from}</p>
             </div>
             <div className="px-3">
-              <ArrowRightLeft className="w-5 h-5 text-primary" />
+              <ArrowRightLeft className="size-4 text-primary" />
             </div>
             <div className="text-center flex-1">
-              <p className="text-sm text-muted-foreground mb-1">To</p>
+              <p className="font-label text-[11px] text-muted-foreground mb-1">To</p>
               <p className="text-lg font-semibold text-foreground">{currentType.to}</p>
             </div>
           </div>
@@ -96,7 +96,7 @@ export function FormatSelector({
 
         {currentType?.id === 'pdf-to-image' && (
           <div>
-            <label className="text-sm font-medium text-foreground mb-2 block">
+            <label className="font-label text-[11px] text-muted-foreground mb-2 block">
               Select Output Image Format
             </label>
             <Select value={selectedImageFormat} onValueChange={onImageFormatChange}>
@@ -115,8 +115,8 @@ export function FormatSelector({
         )}
 
         <div>
-          <p className="text-xs text-muted-foreground mb-2">
-            Accepted formats: {getAcceptedFormats(selectedType).join(', ').toUpperCase()}
+          <p className="font-label text-[11px] text-muted-foreground mb-2">
+            Accepted formats: {getAcceptedFormats(selectedType).join(', ')}
           </p>
         </div>
       </div>

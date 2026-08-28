@@ -1,8 +1,7 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { Upload, X } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Upload } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
@@ -55,7 +54,7 @@ export function UploadArea({ onFilesSelected, acceptedFormats, isLoading = false
       toast({
         title: 'File too large',
         description: `Skipped ${invalidFiles.length} file(s) over 100MB limit.`,
-        className: 'bg-red-50 text-red-900 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900',
+        className: 'bg-destructive text-destructive-foreground border-destructive',
       });
     }
 
@@ -73,9 +72,9 @@ export function UploadArea({ onFilesSelected, acceptedFormats, isLoading = false
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         onClick={() => fileInputRef.current?.click()}
-        className={`relative border-2 border-dashed rounded-lg p-12 text-center cursor-pointer transition-all ${isDragging
-          ? 'border-primary bg-primary/5'
-          : 'border-border hover:border-primary/50 bg-muted/30 hover:bg-muted/50'
+        className={`relative border border-dashed rounded-sm p-12 text-center cursor-pointer transition-colors ${isDragging
+          ? 'border-primary bg-primary/10'
+          : 'border-border hover:border-primary/50 bg-card hover:bg-muted/40'
           } ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
       >
         <input
@@ -89,8 +88,8 @@ export function UploadArea({ onFilesSelected, acceptedFormats, isLoading = false
         />
 
         <div className="flex flex-col items-center gap-3">
-          <div className="rounded-full bg-primary/10 p-3">
-            <Upload className="w-6 h-6 text-primary" />
+          <div className="rounded-sm bg-muted p-2">
+            <Upload className="size-4 text-primary" />
           </div>
           <div>
             <p className="text-lg font-semibold text-foreground">
@@ -100,8 +99,8 @@ export function UploadArea({ onFilesSelected, acceptedFormats, isLoading = false
               or click to browse
             </p>
           </div>
-          <p className="text-xs text-muted-foreground mt-2">
-            Supported formats: {acceptedFormats.join(', ').toUpperCase()}
+          <p className="font-label text-[11px] text-muted-foreground mt-2">
+            Supported formats: {acceptedFormats.join(', ')}
           </p>
         </div>
       </div>

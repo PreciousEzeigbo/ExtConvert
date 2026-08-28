@@ -41,7 +41,7 @@ export function ConversionQueue({
   if (jobs.length === 0) {
     return (
       <div className="text-center py-8 px-4">
-        <File className="w-12 h-12 text-muted-foreground mx-auto mb-3 opacity-50" />
+        <File className="size-4 text-muted-foreground mx-auto mb-3" />
         <p className="text-muted-foreground">No files in queue yet</p>
       </div>
     );
@@ -50,53 +50,53 @@ export function ConversionQueue({
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'processing':
-        return <Loader2 className="w-4 h-4 text-primary animate-spin" />;
+        return <Loader2 className="size-4 text-primary animate-spin" />;
       case 'completed':
-        return <CheckCircle2 className="w-4 h-4 text-green-500" />;
+        return <CheckCircle2 className="size-4 text-primary" />;
       case 'failed':
-        return <AlertCircle className="w-4 h-4 text-destructive" />;
+        return <AlertCircle className="size-4 text-destructive" />;
       default:
-        return <File className="w-4 h-4 text-muted-foreground" />;
+        return <File className="size-4 text-warning" />;
     }
   };
 
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'completed':
-        return 'bg-green-50 border-green-200 dark:bg-green-950/20 dark:border-green-900';
+        return 'bg-card border-border';
       case 'failed':
-        return 'bg-red-50 border-red-200 dark:bg-red-950/20 dark:border-red-900';
+        return 'bg-card border-destructive/40';
       case 'processing':
-        return 'bg-blue-50/70 border-blue-300 dark:bg-blue-950/25 dark:border-blue-800 shadow-[0_0_0_1px_rgba(59,130,246,0.2)]';
+        return 'bg-card border-primary/40';
       default:
-        return 'bg-muted/30 border-border';
+        return 'bg-card border-warning/40';
     }
   };
 
   const JobItem = ({ job }: { job: ConversionJob }) => (
-    <div className={`flex items-center gap-4 p-4 rounded-lg border transition-all ${getStatusColor(job.status)}`}>
+    <div className={`flex items-center gap-4 p-4 rounded-md border ${getStatusColor(job.status)}`}>
       <div className="flex-shrink-0">
         {getStatusIcon(job.status)}
       </div>
 
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium text-foreground truncate">{job.fileName}</p>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
-          <span>{job.fromFormat.toUpperCase()}</span>
+        <div className="flex items-center gap-2 font-label text-[11px] text-muted-foreground mt-1">
+          <span>{job.fromFormat}</span>
           <span>→</span>
-          <span>{job.toFormat.toUpperCase()}</span>
+          <span>{job.toFormat}</span>
         </div>
 
         {job.status === 'processing' && job.progress !== undefined && (
           <div className="mt-1 space-y-1">
-            <div className="mt-2 w-full bg-border/70 rounded-full h-2 overflow-hidden">
+            <div className="mt-2 w-full bg-muted rounded-sm h-2 overflow-hidden">
               <div
-                className="h-full progress-stripes transition-all duration-500 bg-primary"
+                className="h-full bg-primary transition-all duration-500"
                 style={{ width: `${job.progress}%` }}
               />
             </div>
-            <p className="text-xs text-muted-foreground font-medium">
-              {job.progress <= 40 ? 'Uploading' : 'Converting'}... {job.progress}%
+            <p className="font-label text-[11px] text-muted-foreground">
+              {job.progress <= 40 ? 'Uploading' : 'Converting'} {job.progress}%
             </p>
           </div>
         )}
@@ -115,7 +115,7 @@ export function ConversionQueue({
             className="h-8 w-8 p-0"
             title="Download"
           >
-            <Download className="w-4 h-4" />
+            <Download className="size-4" />
           </Button>
         )}
 
@@ -127,20 +127,20 @@ export function ConversionQueue({
                 variant="outline"
                 onClick={() => onConvert([job.id])}
                 disabled={isConverting}
-                className="h-8 w-8 p-0 text-primary border-primary/40 hover:text-primary hover:border-primary/60 hover:bg-primary/10"
+                className="h-8 w-8 p-0"
                 title="Convert File"
               >
-                <Play className="w-4 h-4 ml-0.5" />
+                <Play className="size-4 ml-0.5" />
               </Button>
             )}
             <Button
               size="sm"
               variant="outline"
               onClick={() => onRemove(job.id)}
-              className="h-8 w-8 p-0 text-destructive border-destructive/40 hover:text-destructive hover:border-destructive/60 hover:bg-red-100/80 dark:hover:bg-red-900/35"
+              className="h-8 w-8 p-0 text-destructive"
               title="Remove"
             >
-              <Trash2 className="w-4 h-4" />
+              <Trash2 className="size-4" />
             </Button>
           </>
         )}
@@ -173,7 +173,7 @@ export function ConversionQueue({
             >
               {isConverting ? (
                 <>
-                  <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                  <Loader2 className="size-4 mr-1 animate-spin" />
                   Converting...
                 </>
               ) : (

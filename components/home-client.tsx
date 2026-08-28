@@ -6,6 +6,7 @@ import { UploadArea } from '@/components/upload-area';
 import { FormatSelector, getAcceptedFormatsForType } from '@/components/format-selector';
 import { ConversionHistory } from '@/components/conversion-history';
 import { ThemeToggle } from '@/components/theme-toggle';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useConverter } from '@/hooks/use-converter';
 
 interface HomeClientProps {
@@ -48,17 +49,17 @@ export function HomeClient({ currentYear }: HomeClientProps) {
   const failedCount = failedIds.size;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
-      <header className="border-b border-border/50 backdrop-blur-sm sticky top-0 z-50">
+    <div className="min-h-screen bg-background">
+      <header className="border-b border-border sticky top-0 z-50 bg-background">
         <div className="max-w-6xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-primary/10 p-2">
-                <Zap className="w-6 h-6 text-primary" />
+              <div className="rounded-sm border border-border bg-card p-2">
+                <Zap className="size-4 text-primary" />
               </div>
               <div>
                 <h1 className="text-2xl font-bold text-foreground">ExtConvert</h1>
-                <p className="text-xs text-muted-foreground">Fast document conversion</p>
+                <p className="font-label text-[11px] text-muted-foreground">Fast document conversion</p>
               </div>
             </div>
             <ThemeToggle />
@@ -73,29 +74,37 @@ export function HomeClient({ currentYear }: HomeClientProps) {
               Conversion Tools
             </h2>
 
-            <section className="bg-card border border-border rounded-lg p-6 shadow-sm" aria-labelledby="settings-heading">
-              <h3 id="settings-heading" className="text-lg font-semibold text-foreground mb-4 flex items-center gap-2">
-                <FileText className="w-5 h-5 text-primary" />
-                Conversion Settings
-              </h3>
-              <FormatSelector
-                selectedType={selectedType}
-                onTypeChange={setSelectedType}
-                selectedImageFormat={selectedImageFormat}
-                onImageFormatChange={setSelectedImageFormat}
-              />
-            </section>
+            <Card aria-labelledby="settings-heading">
+              <CardHeader>
+                <CardTitle id="settings-heading" className="text-lg flex items-center gap-2">
+                  <FileText className="size-4 text-primary" />
+                  Conversion Settings
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <FormatSelector
+                  selectedType={selectedType}
+                  onTypeChange={setSelectedType}
+                  selectedImageFormat={selectedImageFormat}
+                  onImageFormatChange={setSelectedImageFormat}
+                />
+              </CardContent>
+            </Card>
 
-            <section className="bg-card border border-border rounded-lg p-6 shadow-sm" aria-labelledby="upload-heading">
-              <h3 id="upload-heading" className="text-lg font-semibold text-foreground mb-4">
-                Upload Files
-              </h3>
-              <UploadArea
-                onFilesSelected={handleFilesSelected}
-                acceptedFormats={acceptedFormats}
-                isLoading={isConverting}
-              />
-            </section>
+            <Card aria-labelledby="upload-heading">
+              <CardHeader>
+                <CardTitle id="upload-heading" className="text-lg">
+                  Upload Files
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <UploadArea
+                  onFilesSelected={handleFilesSelected}
+                  acceptedFormats={acceptedFormats}
+                  isLoading={isConverting}
+                />
+              </CardContent>
+            </Card>
 
             <ConversionHistory
               queue={queue}
@@ -112,10 +121,13 @@ export function HomeClient({ currentYear }: HomeClientProps) {
           </section>
 
           <aside className="space-y-6" aria-label="Converter information">
-            <section className="bg-gradient-to-br from-primary/10 to-primary/5 border border-primary/20 rounded-lg p-6" aria-labelledby="getting-started-heading">
-              <h2 id="getting-started-heading" className="font-semibold text-foreground mb-3">
-                Getting Started
-              </h2>
+            <Card aria-labelledby="getting-started-heading">
+              <CardHeader>
+                <CardTitle id="getting-started-heading" className="text-lg">
+                  Getting Started
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
               <ol className="space-y-2 text-sm text-foreground/80">
                 <li className="flex gap-2">
                   <span className="font-semibold text-primary flex-shrink-0">1.</span>
@@ -134,12 +146,16 @@ export function HomeClient({ currentYear }: HomeClientProps) {
                   <span>Download your converted files</span>
                 </li>
               </ol>
-            </section>
+              </CardContent>
+            </Card>
 
-            <section className="bg-card border border-border rounded-lg p-6" aria-labelledby="features-heading">
-              <h2 id="features-heading" className="font-semibold text-foreground mb-3">
-                Features
-              </h2>
+            <Card aria-labelledby="features-heading">
+              <CardHeader>
+                <CardTitle id="features-heading" className="text-lg">
+                  Features
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
               <ul className="space-y-2 text-sm text-muted-foreground">
                 <li className="flex gap-2">
                   <span className="text-primary">✓</span>
@@ -162,38 +178,43 @@ export function HomeClient({ currentYear }: HomeClientProps) {
                   <span>Drag and drop upload</span>
                 </li>
               </ul>
-            </section>
+              </CardContent>
+            </Card>
 
             {(queue.length > 0 || history.length > 0) && (
-              <section className="bg-muted/30 border border-border rounded-lg p-6" aria-labelledby="stats-heading">
-                <h2 id="stats-heading" className="font-semibold text-foreground mb-3">
-                  Statistics
-                </h2>
-                <div className="space-y-2 text-sm">
+              <Card aria-labelledby="stats-heading">
+                <CardHeader>
+                  <CardTitle id="stats-heading" className="text-lg">
+                    Statistics
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                <div className="space-y-2 font-label text-[11px]">
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">In Queue:</span>
-                    <span className="font-semibold text-foreground">{queue.length}</span>
+                    <span className="text-muted-foreground">In Queue</span>
+                    <span className="text-foreground">{queue.length}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Completed:</span>
-                    <span className="font-semibold text-green-600 dark:text-green-400">
+                    <span className="text-muted-foreground">Completed</span>
+                    <span className="text-primary">
                       {history.filter(j => j.status === 'completed').length}
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Failed:</span>
-                    <span className="font-semibold text-destructive">
+                    <span className="text-muted-foreground">Failed</span>
+                    <span className="text-destructive">
                       {failedCount}
                     </span>
                   </div>
                 </div>
-              </section>
+                </CardContent>
+              </Card>
             )}
           </aside>
         </div>
       </main>
 
-      <footer className="border-t border-border/50 py-5">
+      <footer className="border-t border-border py-5">
         <div className="max-w-6xl mx-auto px-4 text-center text-sm text-muted-foreground">
           &copy; {currentYear} ExtConvert. Your document converter.
         </div>

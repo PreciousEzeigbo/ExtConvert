@@ -234,7 +234,7 @@ export function useConverter() {
             toast({
               title: 'Conversion completed',
               description: `${job.fileName} is ready for download.`,
-              className: 'bg-green-50 text-green-900 border-green-200 dark:bg-green-950/40 dark:text-green-300 dark:border-green-900',
+              className: 'bg-primary text-primary-foreground border-primary',
             });
 
             addToHistory(job);

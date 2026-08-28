@@ -43,29 +43,42 @@ const statusPriority: Record<ConversionJob['status'], number> = {
   failed: 0,
 };
 
+const statusBadgeVariant = (status: ConversionJob['status']) => {
+  switch (status) {
+    case 'processing':
+      return 'secondary' as const;
+    case 'completed':
+      return 'default' as const;
+    case 'failed':
+      return 'destructive' as const;
+    default:
+      return 'warning' as const;
+  }
+};
+
 const rowTone = (status: ConversionJob['status']) => {
   switch (status) {
     case 'processing':
-      return 'border-blue-300 bg-blue-50/70 dark:border-blue-800 dark:bg-blue-950/20';
+      return 'border-primary/40 bg-card';
     case 'completed':
-      return 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/60 dark:bg-emerald-950/20';
+      return 'border-border bg-card';
     case 'failed':
-      return 'border-red-200 bg-red-50/70 dark:border-red-900/60 dark:bg-red-950/20';
+      return 'border-destructive/40 bg-card';
     default:
-      return 'border-border bg-muted/20';
+      return 'border-warning/40 bg-card';
   }
 };
 
 const rowIcon = (job: ConversionJob) => {
   switch (job.status) {
     case 'processing':
-      return <Loader2 className="h-4 w-4 animate-spin text-primary" />;
+      return <Loader2 className="size-4 animate-spin text-primary" />;
     case 'completed':
-      return <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />;
+      return <CheckCircle2 className="size-4 text-primary" />;
     case 'failed':
-      return <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-300" />;
+      return <AlertCircle className="size-4 text-destructive" />;
     default:
-      return <File className="h-4 w-4 text-muted-foreground" />;
+      return <File className="size-4 text-warning" />;
   }
 };
 
@@ -74,11 +87,11 @@ const rowStatusLabel = (job: ConversionJob) => {
     case 'processing':
       return 'Processing';
     case 'completed':
-      return 'Ready';
+      return 'Completed';
     case 'failed':
       return 'Failed';
     default:
-      return 'Queued';
+      return 'Pending';
   }
 };
 
@@ -153,11 +166,11 @@ export function ConversionHistory({
   }
 
   return (
-    <div className="rounded-xl border border-border bg-card/95 p-6 shadow-sm">
+    <div className="rounded-md border border-border bg-card p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
-            <Clock3 className="w-4 h-4 text-muted-foreground" />
+            <Clock3 className="size-4 text-muted-foreground" />
             <h3 className="text-lg font-semibold text-foreground">Conversions</h3>
           </div>
           <p className="text-sm text-muted-foreground">
@@ -177,7 +190,7 @@ export function ConversionHistory({
             >
               {isConverting ? (
                 <>
-                  <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+                  <Loader2 className="size-4 mr-2 animate-spin" />
                   Converting...
                 </>
               ) : (
@@ -191,9 +204,9 @@ export function ConversionHistory({
               variant="ghost"
               size="sm"
               onClick={onClearHistory}
-              className="text-destructive hover:text-destructive hover:bg-red-100/70 dark:hover:bg-red-900/25"
+              className="text-destructive hover:text-destructive hover:bg-destructive/10"
             >
-              <Trash2 className="w-4 h-4 mr-2" />
+              <Trash2 className="size-4 mr-2" />
               Clear all
             </Button>
           )}
@@ -211,7 +224,7 @@ export function ConversionHistory({
             <section key={group.key} className="space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  <p className="font-label text-[11px] text-muted-foreground">
                     {group.label}
                   </p>
                   <p className="text-xs text-muted-foreground">
@@ -228,9 +241,8 @@ export function ConversionHistory({
                     variant="outline"
                     size="sm"
                     onClick={() => onDownloadAll(group.key)}
-                    className="border-primary/30 bg-primary/5 text-primary hover:bg-primary/10"
                   >
-                    <DownloadCloud className="w-4 h-4 mr-2" />
+                    <DownloadCloud className="size-4 mr-2" />
                     Download all
                   </Button>
                 )}
@@ -240,42 +252,42 @@ export function ConversionHistory({
                 {group.jobs.map(job => (
                   <article
                     key={job.id}
-                    className={`rounded-xl border p-4 shadow-sm transition-all ${rowTone(job.status)}`}
+                    className={`rounded-md border p-4 ${rowTone(job.status)}`}
                   >
                     <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-center">
                       <div className="min-w-0 space-y-2">
                         <div className="flex items-start gap-3">
-                          <span className="mt-1 inline-flex h-7 w-7 items-center justify-center rounded-full bg-background/80 text-foreground shadow-sm ring-1 ring-black/5 dark:ring-white/5">
+                          <span className="mt-1 inline-flex size-7 items-center justify-center rounded-sm border border-border bg-background text-foreground">
                             {rowIcon(job)}
                           </span>
                           <div className="min-w-0 flex-1 space-y-1">
                             <div className="flex flex-wrap items-center gap-2">
-                              <h4 className="truncate text-sm font-semibold text-foreground">
+                              <p className="truncate text-sm font-semibold text-foreground">
                                 {job.fileName}
-                              </h4>
-                              <Badge variant="outline" className="uppercase tracking-wide">
-                                {job.toFormat.toUpperCase()}
+                              </p>
+                              <Badge variant="outline">
+                                {job.toFormat}
                               </Badge>
                               {job.downloaded && job.status === 'completed' && (
-                                <Badge variant="secondary" className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                                <Badge variant="secondary">
                                   Downloaded
                                 </Badge>
                               )}
-                              <Badge variant={job.status === 'failed' ? 'destructive' : 'secondary'}>
+                              <Badge variant={statusBadgeVariant(job.status)}>
                                 {rowStatusLabel(job)}
                               </Badge>
                             </div>
 
                             {job.status === 'processing' && job.progress !== undefined && (
                               <div className="space-y-1">
-                                <div className="h-2 w-full overflow-hidden rounded-full bg-border/70">
+                                <div className="h-2 w-full overflow-hidden rounded-sm bg-muted">
                                   <div
-                                    className="h-full progress-stripes transition-all duration-500 bg-primary"
+                                    className="h-full bg-primary transition-all duration-500"
                                     style={{ width: `${job.progress}%` }}
                                   />
                                 </div>
-                                <p className="text-xs text-muted-foreground font-medium">
-                                  {job.progress <= 40 ? 'Uploading' : 'Converting'}... {job.progress}%
+                                <p className="font-label text-[11px] text-muted-foreground">
+                                  {job.progress <= 40 ? 'Uploading' : 'Converting'} {job.progress}%
                                 </p>
                               </div>
                             )}
@@ -285,9 +297,8 @@ export function ConversionHistory({
                             )}
 
                             {job.status === 'completed' && (
-                              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                                <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-300">
-                                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                              <div className="flex flex-wrap items-center gap-2 font-label text-[11px] text-muted-foreground">
+                                <span className="inline-flex items-center gap-1 text-primary">
                                   Converted
                                 </span>
                                 <span>•</span>
@@ -296,7 +307,7 @@ export function ConversionHistory({
                             )}
 
                             {job.status === 'failed' && (
-                              <p className="text-sm text-red-700 dark:text-red-300">
+                              <p className="text-sm text-destructive">
                                 {job.error || 'Conversion failed.'}
                               </p>
                             )}
@@ -310,9 +321,9 @@ export function ConversionHistory({
                             <Button
                               size="sm"
                               onClick={() => onDownload(job.id)}
-                              className="h-11 flex-1 bg-foreground text-background hover:bg-foreground/90"
+                              className="h-11 flex-1"
                             >
-                              <Download className="w-4 h-4 mr-2" />
+                              <Download className="size-4 mr-2" />
                               Download
                             </Button>
                             {onRemoveFromHistory && (
@@ -320,10 +331,10 @@ export function ConversionHistory({
                                 size="sm"
                                 variant="outline"
                                 onClick={() => onRemoveFromHistory(job.id)}
-                                className="h-11 w-11 p-0 border-destructive/40 text-destructive hover:bg-red-100/80 hover:text-destructive/90 shrink-0"
+                                className="h-11 w-11 p-0 shrink-0 text-destructive"
                                 title="Clear File"
                               >
-                                <Trash2 className="w-4 h-4" />
+                                <Trash2 className="size-4" />
                               </Button>
                             )}
                           </div>
@@ -334,9 +345,10 @@ export function ConversionHistory({
                             <Button
                               size="sm"
                               onClick={() => onRetry(job.id)}
-                              className="h-11 flex-1 bg-red-600 text-white hover:bg-red-700"
+                              className="h-11 flex-1"
+                              variant="destructive"
                             >
-                              <RefreshCw className="w-4 h-4 mr-2" />
+                              <RefreshCw className="size-4 mr-2" />
                               Retry
                             </Button>
                             {onRemoveFromHistory && (
@@ -344,10 +356,10 @@ export function ConversionHistory({
                                 size="sm"
                                 variant="outline"
                                 onClick={() => onRemoveFromHistory(job.id)}
-                                className="h-11 w-11 p-0 border-destructive/40 text-destructive hover:bg-red-100/80 hover:text-destructive/90 shrink-0"
+                                className="h-11 w-11 p-0 shrink-0 text-destructive"
                                 title="Clear File"
                               >
-                                <Trash2 className="w-4 h-4" />
+                                <Trash2 className="size-4" />
                               </Button>
                             )}
                           </div>
@@ -359,19 +371,19 @@ export function ConversionHistory({
                               size="sm"
                               onClick={() => onConvert([job.id])}
                               disabled={isConverting}
-                              className="h-11 flex-1 bg-primary text-primary-foreground hover:bg-primary/90"
+                              className="h-11 flex-1"
                             >
-                              <Play className="w-4 h-4 mr-2" />
+                              <Play className="size-4 mr-2" />
                               Convert
                             </Button>
                             <Button
                               size="sm"
                               variant="outline"
                               onClick={() => onRemoveFromQueue(job.id)}
-                              className="h-11 w-11 p-0 border-destructive/40 text-destructive hover:bg-red-100/80 hover:text-destructive/90 shrink-0"
+                              className="h-11 w-11 p-0 shrink-0 text-destructive"
                               title="Remove File"
                             >
-                              <Trash2 className="w-4 h-4" />
+                              <Trash2 className="size-4" />
                             </Button>
                           </div>
                         )}
