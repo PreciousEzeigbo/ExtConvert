@@ -1,5 +1,6 @@
-'use client';
+ 'use client';
 
+import { useState } from 'react';
 import { File, Download, Loader2, CheckCircle2, AlertCircle, Trash2, Play } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -73,8 +74,16 @@ export function ConversionQueue({
     }
   };
 
-  const JobItem = ({ job }: { job: ConversionJob }) => (
-    <div className={`flex items-center gap-4 p-4 rounded-md border ${getStatusColor(job.status)}`}>
+  const JobItem = ({ job }: { job: ConversionJob }) => {
+    const [leaving, setLeaving] = useState(false);
+
+    const startRemove = (id: string) => {
+      setLeaving(true);
+      setTimeout(() => onRemove(id), 180);
+    };
+
+    return (
+      <div className={`flex items-center gap-4 p-4 rounded-md border ${getStatusColor(job.status)} transition-all duration-200 ease-out ${leaving ? 'opacity-0 -translate-y-2 max-h-0 p-0 overflow-hidden' : 'opacity-100'}`}>
       <div className="flex-shrink-0">
         {getStatusIcon(job.status)}
       </div>
@@ -102,7 +111,7 @@ export function ConversionQueue({
         )}
 
         {job.status === 'failed' && job.error && (
-          <p className="text-xs text-destructive mt-1">{job.error}</p>
+          <p className="text-xs text-destructive mt-1 transition-opacity duration-200">{job.error}</p>
         )}
       </div>
 
@@ -136,7 +145,7 @@ export function ConversionQueue({
             <Button
               size="sm"
               variant="outline"
-              onClick={() => onRemove(job.id)}
+              onClick={() => startRemove(job.id)}
               className="h-8 w-8 p-0 text-destructive"
               title="Remove"
             >
@@ -146,7 +155,8 @@ export function ConversionQueue({
         )}
       </div>
     </div>
-  );
+    );
+  };
 
   return (
     <div className="space-y-6">

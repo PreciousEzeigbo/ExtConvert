@@ -156,6 +156,17 @@ export function useConverter() {
               error: 'Missing source file. Re-upload and try again.',
               progress: 0,
             });
+            // Move any missing-source jobs into history and remove from the queue so the UI
+            // does not keep showing a stale/pending entry that cannot be processed.
+            addToHistory({
+              ...job,
+              batchId,
+              status: 'failed',
+              progress: 0,
+              error: 'Missing source file. Re-upload and try again.',
+              downloaded: false,
+            });
+            removeFromQueue(job.id);
           });
 
           continue;
@@ -265,6 +276,9 @@ export function useConverter() {
               error: errorMessage,
               downloaded: false,
             });
+            // Ensure the failed job is removed from the queue so it does not reappear in the UI
+            // due to merge logic between queue + history.
+            removeFromQueue(job.id);
           });
         }
       }
@@ -317,16 +331,28 @@ export function useConverter() {
   }, [convertFiles, removeHistoryItem]);
 
   const removeFromHistory = useCallback((jobId: string) => {
+    // Remove from local history state
     removeHistoryItem(jobId);
-  }, [removeHistoryItem]);
+    // Also ensure the job is removed from the queue so merged views don't resurrect it
+    try {
+      removeFromQueue(jobId);
+    } catch (e) {
+      // ignore
+    }
+  }, [removeHistoryItem, removeFromQueue]);
 
   const clearHistory = useCallback(() => {
     clearLocalHistory();
 
+    // Remove any stale failed jobs that may still be present in the queue
+    // (these can appear when a batch-level failure occurred and the job
+    // wasn't properly removed from the queue).
+    queue.filter(j => j.status === 'failed').forEach(j => removeFromQueue(j.id));
+
     clearBackendHistory().catch(error => {
       console.error('Failed to clear backend history:', error);
     });
-  }, [clearLocalHistory]);
+  }, [clearLocalHistory, queue, removeFromQueue]);
 
   return {
     queue,
